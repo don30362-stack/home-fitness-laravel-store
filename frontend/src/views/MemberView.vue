@@ -25,6 +25,10 @@ const handleLogout = async () => {
                     </div>
 
                     <nav class="list-group">
+                        <RouterLink :to="{ name: 'member-orders' }" class="list-group-item list-group-item-action"
+                            active-class="active">
+                            我的訂單
+                        </RouterLink>
                         <RouterLink :to="{ name: 'member-profile' }" class="list-group-item list-group-item-action"
                             active-class="active">
                             基本資料

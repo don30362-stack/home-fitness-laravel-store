@@ -32,7 +32,7 @@ export const setSessionFailureHandler = (
 
 export const isLoginRequest = (url = '') => /(?:^|\/)login\/?(?:\?|$)/.test(url)
 export const isMemberRequest = (url = '') =>
-  /(?:^|\/)(?:me|addresses|cart|checkout|logout)(?:\/|\?|$)/.test(url)
+  /(?:^|\/)(?:me|addresses|cart|checkout|logout|orders)(?:\/|\?|$)/.test(url)
 
 export const reportSessionFailure = (
   requestVersion: number,

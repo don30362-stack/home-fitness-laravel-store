@@ -4,6 +4,7 @@ import { computed } from 'vue'
 const props = defineProps<{
   currentPage: number
   lastPage: number
+  label?: string
 }>()
 
 const emit = defineEmits<{
@@ -24,7 +25,7 @@ const changePage = (page: number) => {
 </script>
 
 <template>
-  <nav v-if="lastPage > 1" aria-label="商品分頁">
+  <nav v-if="lastPage > 1" :aria-label="label ?? '商品分頁'">
     <ul class="pagination justify-content-center mt-5">
       <li class="page-item" :class="{ disabled: currentPage === 1 }">
         <button

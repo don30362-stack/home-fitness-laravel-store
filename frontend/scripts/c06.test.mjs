@@ -66,6 +66,15 @@ test('本機清理保留訪客車且不送刪除／logout API', () => {
   assertCleared(); assert.equal(auth.authFailureReason, 'disabled'); assert.equal(calls.length, 0)
 })
 
+test('orders 接入既有會員失效流程，拒絕時清理且通知導頁', async () => {
+  for (const status of [401, 403]) {
+    setup(); api.defaults.adapter = (config) => reject(config, status, status === 403 ? 'ACCOUNT_DISABLED' : undefined)
+    await assert.rejects(api.get('/orders'))
+    assertCleared()
+    assert.deepEqual(notifications, [{ reason: status === 403 ? 'disabled' : 'expired', redirect: true }])
+  }
+})
+
 test('並行 ACCOUNT_DISABLED 只處理一次，後到 401／419 不蓋停用原因、不重送', async () => {
   setup()
   api.defaults.adapter = (config) => { calls.push(config); return config.url === '/cart' ? reject(config, 401) : config.url === '/checkout' ? reject(config, 419) : disabled(config) }
