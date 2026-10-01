@@ -40,26 +40,28 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
 Route::middleware('auth:sanctum')->group(function () {
-    Route::get('/me', [ProfileController::class, 'show']);
-    Route::patch('/me', [ProfileController::class, 'update']);
-    Route::patch('/me/password', [ProfileController::class, 'updatePassword']);
-
     Route::post('/logout', [AuthController::class, 'logout']);
 
-    Route::get('/addresses', [AddressController::class, 'index']);
-    Route::post('/addresses', [AddressController::class, 'store']);
-    Route::patch('/addresses/{id}', [AddressController::class, 'update'])->whereNumber('id');
-    Route::delete('/addresses/{id}', [AddressController::class, 'destroy'])->whereNumber('id');
-    Route::patch('/addresses/{id}/default', [AddressController::class, 'setDefault'])->whereNumber('id');
+    Route::middleware('member.active')->group(function () {
+        Route::get('/me', [ProfileController::class, 'show']);
+        Route::patch('/me', [ProfileController::class, 'update']);
+        Route::patch('/me/password', [ProfileController::class, 'updatePassword']);
 
-    Route::get('/cart', [CartController::class, 'show']);
-    Route::post('/cart/items', [CartController::class, 'store']);
-    Route::post('/cart/merge', [CartController::class, 'merge']);
-    Route::patch('/cart/items/{id}', [CartController::class, 'update'])
-        ->whereNumber('id');
-    Route::delete('/cart/items/{id}', [CartController::class, 'destroy'])
-        ->whereNumber('id');
-    Route::delete('/cart', [CartController::class, 'clear']);
+        Route::get('/addresses', [AddressController::class, 'index']);
+        Route::post('/addresses', [AddressController::class, 'store']);
+        Route::patch('/addresses/{id}', [AddressController::class, 'update'])->whereNumber('id');
+        Route::delete('/addresses/{id}', [AddressController::class, 'destroy'])->whereNumber('id');
+        Route::patch('/addresses/{id}/default', [AddressController::class, 'setDefault'])->whereNumber('id');
 
-    Route::post('/checkout', CheckoutController::class);
+        Route::get('/cart', [CartController::class, 'show']);
+        Route::post('/cart/items', [CartController::class, 'store']);
+        Route::post('/cart/merge', [CartController::class, 'merge']);
+        Route::patch('/cart/items/{id}', [CartController::class, 'update'])
+            ->whereNumber('id');
+        Route::delete('/cart/items/{id}', [CartController::class, 'destroy'])
+            ->whereNumber('id');
+        Route::delete('/cart', [CartController::class, 'clear']);
+
+        Route::post('/checkout', CheckoutController::class);
+    });
 });

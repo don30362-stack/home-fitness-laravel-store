@@ -20,3 +20,11 @@ frontend/dist/
 backend/vendor/
 backend/storage/logs/
 backend/bootstrap/cache/*.php
+
+# Docs
+docs/
+
+# Ai
+AGENTS.md
+PROJECT_DECISIONS.md
+PROJECT_STATUS.md

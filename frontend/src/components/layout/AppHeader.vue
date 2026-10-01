@@ -17,9 +17,9 @@ const handleLogout = async () => {
     isLoggingOut.value = true
 
     try {
-        await authStore.logout()
-
-        await router.push({ name: 'home' })
+        if (await authStore.logout()) {
+            await router.push({ name: 'home' })
+        }
     } finally {
         isLoggingOut.value = false
     }

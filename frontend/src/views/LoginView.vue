@@ -6,6 +6,7 @@ import type { ApiErrorResponse } from '@/types/api'
 
 import { useAuthStore } from '@/stores/auth'
 import { useCartStore } from '@/stores/cart'
+import { ACCOUNT_DISABLED_MESSAGE, SessionInvalidatedError } from '@/services/sessionState'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,6 +18,9 @@ const password = ref('')
 
 const isSubmitting = ref(false)
 const errorMessage = ref('')
+const visibleErrorMessage = computed(() =>
+  authStore.authFailureReason === 'disabled' ? ACCOUNT_DISABLED_MESSAGE : errorMessage.value,
+)
 
 const isRegistered = computed(() => {
   return route.query.registered === '1'
@@ -38,7 +42,8 @@ const handleLogin = async () => {
 
     try {
       await cartStore.mergeGuestCart()
-    } catch {
+    } catch (error) {
+      if (!authStore.isAuthenticated || error instanceof SessionInvalidatedError) return
       // 此時帳號已登入成功，只是購物車同步失敗。
       // 訪客 localStorage 購物車仍然保留。
       await router.push({
@@ -55,6 +60,7 @@ const handleLogin = async () => {
 
     await router.push(redirect)
   } catch (error) {
+    if (error instanceof SessionInvalidatedError) return
     if (!axios.isAxiosError<ApiErrorResponse>(error)) {
       errorMessage.value = '登入失敗，請稍後再試'
       return
@@ -88,8 +94,8 @@ const handleLogin = async () => {
           會員註冊成功，請登入。
         </div>
 
-        <div v-if="errorMessage" class="alert alert-danger" role="alert">
-          {{ errorMessage }}
+        <div v-if="visibleErrorMessage" class="alert alert-danger" role="alert">
+          {{ visibleErrorMessage }}
         </div>
 
         <form @submit.prevent="handleLogin">

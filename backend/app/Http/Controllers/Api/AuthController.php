@@ -49,7 +49,8 @@ class AuthController extends Controller
 
         if ($user->status !== 'active') {
             return response()->json([
-                'message' => '此會員帳號目前無法登入'
+                'code' => 'ACCOUNT_DISABLED',
+                'message' => '此會員帳號已停用，請聯絡管理員',
             ], 403);
         }
 

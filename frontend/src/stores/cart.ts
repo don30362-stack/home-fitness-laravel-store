@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import { ensureSessionVersion, getSessionVersion } from '@/services/sessionState'
 
 import type {
     AddGuestCartItemPayload,
@@ -287,11 +288,12 @@ export const useCartStore = defineStore('cart', () => {
     }
 
     const fetchMemberCart = async () => {
+        const requestVersion = getSessionVersion()
         isMemberCartLoading.value = true
 
         try {
             const response = await getCart()
-
+            ensureSessionVersion(requestVersion)
             memberCart.value = response.data
 
             return response
@@ -303,8 +305,9 @@ export const useCartStore = defineStore('cart', () => {
     const addMemberItem = async (
         payload: StoreCartItemPayload,
     ) => {
+        const requestVersion = getSessionVersion()
         const response = await addCartItemApi(payload)
-
+        ensureSessionVersion(requestVersion)
         memberCart.value = response.data
 
         return response
@@ -314,33 +317,38 @@ export const useCartStore = defineStore('cart', () => {
         itemId: number,
         payload: UpdateCartItemPayload,
     ) => {
+        const requestVersion = getSessionVersion()
         const response = await updateCartItemApi(
             itemId,
             payload,
         )
 
+        ensureSessionVersion(requestVersion)
         memberCart.value = response.data
 
         return response
     }
 
     const removeMemberItem = async (itemId: number) => {
+        const requestVersion = getSessionVersion()
         const response = await removeCartItemApi(itemId)
-
+        ensureSessionVersion(requestVersion)
         memberCart.value = response.data
 
         return response
     }
 
     const clearMemberCart = async () => {
+        const requestVersion = getSessionVersion()
         const response = await clearCartApi()
-
+        ensureSessionVersion(requestVersion)
         memberCart.value = response.data
 
         return response
     }
 
     const mergeGuestCart = async () => {
+        const requestVersion = getSessionVersion()
         if (guestItems.value.length === 0) {
             return await fetchMemberCart()
         }
@@ -355,9 +363,10 @@ export const useCartStore = defineStore('cart', () => {
             }),
         })
 
+        ensureSessionVersion(requestVersion)
         memberCart.value = response.data
 
-        // 必須等後端合併成功後才能清除訪客購物車。
+        // 必須等後端合併成功且登入仍有效，才能清除訪客購物車。
         clearGuestCart()
 
         return response
