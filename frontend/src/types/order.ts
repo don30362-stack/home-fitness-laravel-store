@@ -1,4 +1,4 @@
-import type { ApiResponse, PaginatedApiResponse } from './api'
+import type { ApiMessageResponse, ApiResponse, PaginatedApiResponse } from './api'
 
 export interface OrderSummary {
   id: number
@@ -43,3 +43,4 @@ export interface OrderDetail extends OrderSummary {
 }
 
 export type OrderDetailResponse = ApiResponse<OrderDetail>
+export type OrderCancellationResponse = ApiMessageResponse<OrderDetail>

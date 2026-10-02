@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { test, after } from 'node:test'
+import { test, after, beforeEach } from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'vite'
 import { parse, compileScript } from '@vue/compiler-sfc'
@@ -36,6 +36,12 @@ const { default: List } = await server.ssrLoadModule('virtual:order-list')
 const { default: Detail } = await server.ssrLoadModule('virtual:order-detail')
 const { default: Checkout } = await server.ssrLoadModule('virtual:checkout')
 const { useAuthStore } = await server.ssrLoadModule('/src/stores/auth.ts')
+const { useCartStore } = await server.ssrLoadModule('/src/stores/cart.ts')
+const sessionState = await server.ssrLoadModule('/src/services/sessionState.ts')
+beforeEach(() => {
+  sessionState.startSessionVersion()
+  sessionState.setSessionFailureHandler(() => {})
+})
 const { default: Member } = await server.ssrLoadModule('/src/views/MemberView.vue')
 const originalError = console.error
 console.error = () => {}
@@ -186,7 +192,7 @@ test('列表連結 → 詳細快照 → 以同 URL 重建時重新 GET，不依�
   for (const value of ['原商品名稱', 'SNAP-001', '重量：10kg', '原訂購人', '原收件人', '原地址', '商品小計', '運費', '總金額', '尚無資料']) {
     assert.ok(text(view.root).includes(value), value)
   }
-  assert.ok(!text(view.root).includes('取消訂單'))
+  assert.ok(find(view.root, (el) => el.type === 'button' && text(el) === '取消訂單'))
   const url = view.router.currentRoute.value.fullPath; view.app.unmount()
   const reopened = await mount(url); await settle()
   assert.deepEqual(urls, ['/orders', '/orders/1', '/orders/1'])
@@ -255,3 +261,233 @@ for (const method of ['cod', 'mock_credit_card']) {
     assert.ok(text(reopened.root).includes(method === 'cod' ? '未付款' : '已付款')); reopened.app.unmount()
   })
 }
+
+const button = (root, label) => find(root, (el) => el.type === 'button' && text(el).trim() === label)
+const openConfirmation = async (view) => {
+  button(view.root, '取消訂單').props.onClick(); await nextTick()
+}
+const confirm = async (view) => {
+  await openConfirmation(view)
+  button(view.root, '確認取消').props.onClick(); await settle()
+}
+const apiFailure = (config, status, message = '測試錯誤', code) => {
+  throw new axios.AxiosError('test', 'ERR_BAD_RESPONSE', config, undefined, {
+    ...reply(config, { message, ...(code ? { code } : {}) }), status,
+  })
+}
+
+for (const status of ['pending', 'processing', 'shipped', 'completed', 'cancelled', 'unknown']) {
+  test(status + ' 取消按鈕資格', async () => {
+    api.defaults.adapter = async (config) => reply(config, { data: { ...detail(1), order_status: status } })
+    const view = await mount('/member/orders/1'); await settle()
+    assert.equal(Boolean(button(view.root, '取消訂單')), ['pending', 'processing'].includes(status))
+    view.app.unmount()
+  })
+}
+
+test('放棄確認不送 POST，也不改訂單狀態', async () => {
+  const calls = []
+  api.defaults.adapter = async (config) => { calls.push(config); return reply(config, { data: detail(1) }) }
+  const view = await mount('/member/orders/1'); await settle()
+  await openConfirmation(view)
+  assert.ok(text(view.root).includes('確定要取消'))
+  button(view.root, '保留訂單').props.onClick(); await nextTick()
+  assert.ok(!button(view.root, '確認取消'))
+  assert.equal(calls.filter((call) => call.method === 'post').length, 0)
+  assert.ok(text(view.root).includes('待處理'))
+  view.app.unmount()
+})
+
+test('確認 POST／送出防重複／無 optimistic／paid cancelled／列表及詳細重新 GET 一致', async () => {
+  let current = detail(1, 'mock_credit_card')
+  let finish
+  const calls = []
+  api.defaults.adapter = (config) => {
+    calls.push(config)
+    if (config.method === 'post') return new Promise((resolve) => {
+      finish = () => {
+        current = { ...current, order_status: 'cancelled' }
+        resolve(reply(config, { data: current, message: '訂單已取消。' }))
+      }
+    })
+    return Promise.resolve(reply(config, config.url === '/orders' ? pageData(1, [current]) : { data: current }))
+  }
+  const view = await mount('/member/orders/1'); await settle()
+  await confirm(view)
+  const submit = button(view.root, '確認取消')
+  assert.equal(submit.props.disabled, true)
+  assert.equal(button(view.root, '取消訂單').props.disabled, true)
+  assert.equal(button(view.root, '保留訂單').props.disabled, true)
+  assert.ok(text(view.root).includes('正在取消訂單'))
+  assert.ok(text(view.root).includes('待處理'))
+  submit.props.onClick(); await settle()
+  const posts = calls.filter((call) => call.method === 'post')
+  assert.equal(posts.length, 1); assert.equal(posts[0].url, '/orders/1/cancel')
+  assert.equal(posts[0].data, undefined)
+  finish(); await settle()
+  assert.ok(text(view.root).includes('已取消')); assert.ok(text(view.root).includes('已付款'))
+  assert.ok(!text(view.root).includes('已退款')); assert.ok(!button(view.root, '取消訂單'))
+  click(find(view.root, (el) => el.type === 'a' && el.props.href === '/member/orders')); await settle(); await settle()
+  assert.ok(text(view.root).includes('已取消'))
+  click(find(view.root, (el) => el.type === 'a' && el.props.href === '/member/orders/1')); await settle(); await settle()
+  assert.ok(text(view.root).includes('已取消')); assert.ok(!button(view.root, '取消訂單'))
+  view.app.unmount()
+  const reopened = await mount('/member/orders/1'); await settle()
+  assert.ok(text(reopened.root).includes('已取消')); assert.ok(!button(reopened.root, '取消訂單'))
+  assert.equal(calls.filter((call) => call.url === '/orders/1').length, 3)
+  reopened.app.unmount()
+})
+
+for (const status of ['shipped', 'completed']) {
+  test('422 重新 GET 真值 ' + status + '，不重送 POST／不假裝成功', async () => {
+    const calls = []
+    api.defaults.adapter = async (config) => {
+      calls.push(config)
+      if (config.method === 'post') return apiFailure(config, 422, '此訂單目前的狀態不允許取消。')
+      return reply(config, { data: { ...detail(1), order_status: calls.length > 1 ? status : 'pending' } })
+    }
+    const view = await mount('/member/orders/1'); await settle(); await confirm(view); await settle()
+    assert.deepEqual(calls.map((call) => call.method), ['get', 'post', 'get'])
+    assert.ok(text(view.root).includes('此訂單目前的狀態不允許取消'))
+    assert.ok(text(view.root).includes(status === 'shipped' ? '已出貨' : '已完成'))
+    assert.ok(!text(view.root).includes('訂單已取消')); assert.ok(!button(view.root, '取消訂單'))
+    view.app.unmount()
+  })
+}
+
+test('取消 404 使用不可取得呈現，不保留已載入的訂單', async () => {
+  api.defaults.adapter = async (config) => config.method === 'post' ? apiFailure(config, 404) : reply(config, { data: detail(1) })
+  const view = await mount('/member/orders/1'); await settle(); await confirm(view)
+  assert.ok(text(view.root).includes('找不到此訂單'))
+  assert.ok(!text(view.root).includes('HF-TEST-1')); assert.ok(!button(view.root, '取消訂單'))
+  view.app.unmount()
+})
+
+for (const failure of [403, 419, 500, 503, 'network']) {
+  test(failure + ' 取消錯誤不當停用／不重送／保留原訂單／可手動重新確認', async () => {
+    let posts = 0
+    const notifications = []
+    sessionState.setSessionFailureHandler((...args) => notifications.push(args))
+    api.defaults.adapter = async (config) => {
+      if (config.method !== 'post') return reply(config, { data: detail(1) })
+      ++posts
+      if (failure === 'network') throw new axios.AxiosError('network', 'ERR_NETWORK', config)
+      return apiFailure(config, failure)
+    }
+    const view = await mount('/member/orders/1'); await settle(); await confirm(view)
+    assert.equal(posts, 1); assert.deepEqual(notifications, [])
+    assert.ok(text(view.root).includes('取消訂單失敗'))
+    assert.ok(text(view.root).includes('待處理')); assert.ok(!text(view.root).includes('已取消'))
+    assert.equal(button(view.root, '取消訂單').props.disabled, false)
+    await confirm(view)
+    assert.equal(posts, 2)
+    view.app.unmount()
+  })
+}
+
+for (const failure of [401, 'ACCOUNT_DISABLED']) {
+  test(failure + ' cancel POST 經共用 C06 清理與導頁通知，頁面不另寫 session handling', async () => {
+    const notifications = []
+    let auth, cart, posts = 0
+    api.defaults.adapter = async (config) => {
+      if (config.method !== 'post') return reply(config, { data: detail(1) })
+      ++posts
+      return apiFailure(config, failure === 401 ? 401 : 403, '會員拒絕', failure === 401 ? undefined : failure)
+    }
+    const view = await mount('/member/orders/1', (pinia) => {
+      auth = useAuthStore(pinia); cart = useCartStore(pinia)
+      auth.currentUser = { id: 1, name: '測試會員', email: 'test@example.test', phone: '0912345678', status: 'active' }
+      cart.memberCart = { items: [], item_count: 0, subtotal: '0.00', has_unavailable_items: false }
+      sessionState.setSessionFailureHandler((reason, redirect) => {
+        notifications.push({ reason, redirect }); auth.resetMemberSession(reason)
+      })
+    })
+    await settle(); await confirm(view)
+    assert.equal(posts, 1); assert.equal(auth.currentUser, null); assert.equal(cart.memberCart, null)
+    assert.deepEqual(notifications, [{ reason: failure === 401 ? 'expired' : 'disabled', redirect: true }])
+    assert.ok(!text(view.root).includes('訂單已取消'))
+    view.app.unmount()
+  })
+}
+
+for (const failure of [false, true]) {
+  test('切換訂單後舊 cancel ' + (failure ? '失敗' : '成功') + ' 不覆蓋目前資料及操作狀態', async () => {
+    let finish
+    api.defaults.adapter = (config) => {
+      if (config.method === 'post') return new Promise((resolve, reject) => {
+        finish = () => {
+          if (failure) {
+            try { apiFailure(config, 404) } catch (error) { reject(error) }
+          } else resolve(reply(config, { data: { ...detail(1), order_status: 'cancelled' }, message: '訂單已取消。' }))
+        }
+      })
+      return Promise.resolve(reply(config, { data: detail(Number(config.url.split('/').at(-1))) }))
+    }
+    const view = await mount('/member/orders/1'); await settle(); await confirm(view)
+    await view.router.push('/member/orders/2'); await settle()
+    // Even returning to the same id must invalidate the original request.
+    await view.router.push('/member/orders/1'); await settle()
+    await openConfirmation(view)
+    finish(); await settle()
+    assert.ok(text(view.root).includes('HF-TEST-1')); assert.ok(text(view.root).includes('待處理'))
+    assert.ok(!text(view.root).includes('找不到此訂單')); assert.ok(!text(view.root).includes('已取消'))
+    assert.equal(button(view.root, '確認取消').props.disabled, false)
+    view.app.unmount()
+  })
+}
+
+test('422 refresh GET 晚到，不覆蓋後來切換的另一張訂單', async () => {
+  let gets = 0, finish
+  api.defaults.adapter = (config) => {
+    if (config.method === 'post') return Promise.reject((() => {
+      try { apiFailure(config, 422, '目前無法取消') } catch (error) { return error }
+    })())
+    if (config.url === '/orders/1' && ++gets > 1) return new Promise((resolve) => {
+      finish = () => resolve(reply(config, { data: { ...detail(1), order_status: 'shipped' } }))
+    })
+    return Promise.resolve(reply(config, { data: detail(Number(config.url.split('/').at(-1))) }))
+  }
+  const view = await mount('/member/orders/1'); await settle(); await confirm(view)
+  await view.router.push('/member/orders/2'); await settle()
+  finish(); await settle()
+  assert.ok(text(view.root).includes('HF-TEST-2')); assert.ok(!text(view.root).includes('HF-TEST-1'))
+  assert.ok(!text(view.root).includes('目前無法取消')); assert.equal(button(view.root, '取消訂單').props.disabled, false)
+  view.app.unmount()
+})
+
+test('舊取消完成不能解除新訂單送出中的 guard 或覆蓋新訂單', async () => {
+  const finishes = []
+  api.defaults.adapter = (config) => {
+    const id = Number(config.url.split('/')[2])
+    if (config.method === 'post') return new Promise((resolve) => {
+      finishes.push(() => resolve(reply(config, { data: { ...detail(id), order_status: 'cancelled' }, message: '訂單已取消。' })))
+    })
+    return Promise.resolve(reply(config, { data: detail(id) }))
+  }
+  const view = await mount('/member/orders/1'); await settle(); await confirm(view)
+  await view.router.push('/member/orders/2'); await settle(); await confirm(view)
+  finishes[0](); await settle()
+  assert.ok(text(view.root).includes('HF-TEST-2')); assert.ok(text(view.root).includes('待處理'))
+  assert.ok(!text(view.root).includes('已取消'))
+  assert.equal(button(view.root, '確認取消').props.disabled, true)
+  button(view.root, '確認取消').props.onClick(); await settle()
+  assert.equal(finishes.length, 2)
+  finishes[1](); await settle()
+  assert.ok(text(view.root).includes('HF-TEST-2')); assert.ok(text(view.root).includes('已取消'))
+  view.app.unmount()
+})
+
+test('422 回查失敗使用詳細載入錯誤；手動重試只 GET，不重送取消', async () => {
+  let gets = 0, posts = 0
+  api.defaults.adapter = async (config) => {
+    if (config.method === 'post') { ++posts; return apiFailure(config, 422, '目前無法取消') }
+    if (++gets === 2) throw new axios.AxiosError('network', 'ERR_NETWORK', config)
+    return reply(config, { data: { ...detail(1), order_status: gets > 2 ? 'completed' : 'pending' } })
+  }
+  const view = await mount('/member/orders/1'); await settle(); await confirm(view); await settle()
+  assert.ok(text(view.root).includes('訂單載入失敗')); assert.ok(!text(view.root).includes('已取消'))
+  button(view.root, '重新載入').props.onClick(); await settle()
+  assert.ok(text(view.root).includes('已完成')); assert.ok(!button(view.root, '取消訂單'))
+  assert.equal(posts, 1); assert.equal(gets, 3)
+  view.app.unmount()
+})
