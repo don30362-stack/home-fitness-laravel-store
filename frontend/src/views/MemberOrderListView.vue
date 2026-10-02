@@ -68,11 +68,11 @@ onBeforeUnmount(() => { ++requestId })
         <thead><tr><th scope="col">訂單編號</th><th scope="col">成立時間</th><th scope="col">總金額</th><th scope="col">付款方式／狀態</th><th scope="col">訂單狀態</th></tr></thead>
         <tbody>
           <tr v-for="order in orders" :key="order.id">
-            <td><RouterLink :to="{ name: 'member-order-detail', params: { id: order.id } }">{{ order.order_no }}</RouterLink></td>
-            <td>{{ formatDate(order.created_at) }}</td>
-            <td>{{ formatMoney(order.total_amount) }}</td>
-            <td>{{ methodLabels[order.payment_method] ?? order.payment_method }}／{{ paymentLabels[order.payment_status] ?? order.payment_status }}</td>
-            <td>{{ orderLabels[order.order_status] ?? order.order_status }}</td>
+            <td data-label="訂單編號"><RouterLink :to="{ name: 'member-order-detail', params: { id: order.id } }">{{ order.order_no }}</RouterLink></td>
+            <td data-label="成立時間">{{ formatDate(order.created_at) }}</td>
+            <td data-label="總金額">{{ formatMoney(order.total_amount) }}</td>
+            <td data-label="付款狀態">{{ methodLabels[order.payment_method] ?? order.payment_method }}／{{ paymentLabels[order.payment_status] ?? order.payment_status }}</td>
+            <td data-label="訂單狀態">{{ orderLabels[order.order_status] ?? order.order_status }}</td>
           </tr>
         </tbody>
       </table>
@@ -81,3 +81,29 @@ onBeforeUnmount(() => { ++requestId })
       :last-page="pagination.last_page" label="訂單分頁" @change-page="changePage" />
   </section>
 </template>
+
+<style scoped>
+@media (min-width: 768px) {
+  .table th, .table td { white-space: nowrap; }
+}
+
+@media (max-width: 767.98px) {
+  .table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .table, .table tbody, .table tr { display: block; }
+  .table tr { margin-bottom: 1rem; border: 1px solid var(--bs-border-color); }
+  .table td {
+    display: grid;
+    grid-template-columns: 5rem minmax(0, 1fr);
+    gap: .5rem;
+    overflow-wrap: anywhere;
+  }
+  .table td::before { content: attr(data-label); font-weight: 600; }
+}
+</style>
