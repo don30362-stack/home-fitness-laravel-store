@@ -1,0 +1,118 @@
+import { computed, ref } from 'vue'
+import { defineStore } from 'pinia'
+import axios from 'axios'
+import type { ApiErrorResponse } from '@/types/api'
+import type { Admin, AdminLoginPayload } from '@/types/adminAuth'
+import { loginAdmin, getCurrentAdmin, logoutAdmin } from '@/services/adminAuthService'
+import {
+  AdminSessionInvalidatedError, getAdminGeneration, ensureAdminGeneration,
+  startAdminGeneration, setAdminFailureHandler, type AdminFailureReason,
+} from '@/services/adminSessionState'
+import { requestAdminLogin } from '@/services/adminSessionNavigation'
+
+type RestoreResult = 'authenticated' | 'guest' | 'disabled' | 'stale'
+
+export const useAdminAuthStore = defineStore('adminAuth', () => {
+  const currentAdmin = ref<Admin | null>(null)
+  const isAdminInitialized = ref(false)
+  const isRestoring = ref(false)
+  const restoreError = ref<string | null>(null)
+  const adminFailureReason = ref<AdminFailureReason | null>(null)
+  const adminFailureMessage = ref<string | null>(null)
+  const isAdminAuthenticated = computed(() => currentAdmin.value !== null)
+  let pendingRestore: Promise<RestoreResult> | null = null
+
+  const reset = (reason: AdminFailureReason | null = null, message: string | null = null) => {
+    currentAdmin.value = null
+    isAdminInitialized.value = true
+    restoreError.value = null
+    if (adminFailureReason.value !== 'disabled' || reason === 'disabled') {
+      adminFailureReason.value = reason
+      adminFailureMessage.value = message
+    }
+  }
+  setAdminFailureHandler((reason, message, redirect) => {
+    const wasAuthenticated = currentAdmin.value !== null
+    if (reason === 'expired' && !wasAuthenticated && !isAdminInitialized.value) {
+      reset()
+      return
+    }
+    reset(reason, message)
+    if (redirect && (wasAuthenticated || reason === 'disabled')) requestAdminLogin()
+  })
+
+  const clearAdminSession = () => {
+    startAdminGeneration()
+    pendingRestore = null
+    isRestoring.value = false
+    adminFailureReason.value = null
+    reset()
+  }
+  const login = async (payload: AdminLoginPayload) => {
+    const attempt = startAdminGeneration()
+    pendingRestore = null
+    isRestoring.value = false
+    const response = await loginAdmin(payload)
+    ensureAdminGeneration(attempt)
+    startAdminGeneration()
+    currentAdmin.value = response.data
+    isAdminInitialized.value = true
+    restoreError.value = null
+    adminFailureReason.value = null
+    adminFailureMessage.value = null
+    return response
+  }
+  const restoreAdmin = (): Promise<RestoreResult> => {
+    if (pendingRestore) return pendingRestore
+    const expected = getAdminGeneration()
+    isRestoring.value = true
+    restoreError.value = null
+    const request = (async (): Promise<RestoreResult> => {
+      try {
+        const response = await getCurrentAdmin()
+        ensureAdminGeneration(expected)
+        currentAdmin.value = response.data
+        isAdminInitialized.value = true
+        adminFailureReason.value = null
+        adminFailureMessage.value = null
+        return 'authenticated'
+      } catch (error) {
+        if (error instanceof AdminSessionInvalidatedError) return 'stale'
+        if (axios.isAxiosError<ApiErrorResponse>(error)) {
+          if (error.response?.status === 401) return 'guest'
+          if (error.response?.status === 403 && error.response.data?.code === 'ADMIN_ACCOUNT_DISABLED') return 'disabled'
+        }
+        if (expected !== getAdminGeneration()) return 'stale'
+        isAdminInitialized.value = false
+        restoreError.value = '無法恢復管理員登入狀態，請重試'
+        throw error
+      }
+    })()
+    const operation = request.finally(() => {
+      if (pendingRestore === operation) {
+        pendingRestore = null
+        isRestoring.value = false
+      }
+    })
+    pendingRestore = operation
+    return operation
+  }
+  const logout = async () => {
+    const expected = startAdminGeneration()
+    pendingRestore = null
+    isRestoring.value = false
+    try {
+      await logoutAdmin()
+      ensureAdminGeneration(expected)
+    } catch (error) {
+      if (error instanceof AdminSessionInvalidatedError) return false
+      if (axios.isAxiosError(error) && error.response?.status === 401) return false
+      throw error
+    }
+    clearAdminSession()
+    return true
+  }
+
+  return { currentAdmin, isAdminAuthenticated, isAdminInitialized, isRestoring, restoreError,
+    adminFailureReason, adminFailureMessage, login, restoreAdmin, logout, clearAdminSession }
+})

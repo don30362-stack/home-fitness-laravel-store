@@ -10,6 +10,7 @@
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
     "test:c06": "node --test scripts/c06.test.mjs",
+    "test:admin": "node --test scripts/admin-auth.test.mjs",
     "test:orders": "node --test scripts/order-list.test.mjs",
     "lint": "run-s \"lint:*\"",
     "lint:oxlint": "oxlint . --fix",
