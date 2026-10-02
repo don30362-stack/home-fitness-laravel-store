@@ -16,6 +16,7 @@ import NotFoundView from '@/views/NotFoundView.vue'
 import MemberProfileView from '@/views/MemberProfileView.vue'
 import MemberAddressView from '@/views/MemberAddressView.vue'
 import MemberOrderListView from '@/views/MemberOrderListView.vue'
+import MemberOrderDetailView from '@/views/MemberOrderDetailView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -80,6 +81,11 @@ const router = createRouter({
               path: 'orders',
               name: 'member-orders',
               component: MemberOrderListView,
+            },
+            {
+              path: 'orders/:id',
+              name: 'member-order-detail',
+              component: MemberOrderDetailView,
             },
             {
               path: '',

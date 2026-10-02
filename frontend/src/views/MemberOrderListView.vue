@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import AppPagination from '@/components/common/AppPagination.vue'
 import { getOrders } from '@/services/orderService'
 import type { OrderSummary } from '@/types/order'
@@ -68,7 +68,7 @@ onBeforeUnmount(() => { ++requestId })
         <thead><tr><th scope="col">訂單編號</th><th scope="col">成立時間</th><th scope="col">總金額</th><th scope="col">付款方式／狀態</th><th scope="col">訂單狀態</th></tr></thead>
         <tbody>
           <tr v-for="order in orders" :key="order.id">
-            <td>{{ order.order_no }}</td>
+            <td><RouterLink :to="{ name: 'member-order-detail', params: { id: order.id } }">{{ order.order_no }}</RouterLink></td>
             <td>{{ formatDate(order.created_at) }}</td>
             <td>{{ formatMoney(order.total_amount) }}</td>
             <td>{{ methodLabels[order.payment_method] ?? order.payment_method }}／{{ paymentLabels[order.payment_status] ?? order.payment_status }}</td>

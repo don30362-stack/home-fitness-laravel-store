@@ -522,6 +522,10 @@ onMounted(() => {
                         </dl>
 
                         <div class="d-flex flex-column flex-sm-row gap-3 justify-content-center mt-5">
+                            <RouterLink class="btn btn-outline-dark"
+                                :to="{ name: 'member-order-detail', params: { id: createdOrder.id } }">
+                                查看訂單
+                            </RouterLink>
                             <RouterLink class="btn btn-dark" :to="{ name: 'products' }">
                                 繼續購物
                             </RouterLink>

@@ -4,6 +4,10 @@ namespace Tests\Feature;
 
 use App\Models\Order;
 use App\Models\User;
+use App\Models\Category;
+use App\Models\City;
+use App\Models\Product;
+use App\Models\ProductVariant;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
@@ -48,8 +52,9 @@ class OrderApiTest extends TestCase
         $other = $this->createOrder($b);
         foreach ([[$a, $own], [$b, $other]] as [$user, $order]) {
             Auth::forgetGuards();
-            DB::enableQueryLog();
-            DB::flushQueryLog();
+            $connection = DB::connection();
+            $connection->enableQueryLog();
+            $connection->flushQueryLog();
             $response = $this->actingAs($user, 'web')->getJson('/api/orders?user_id='.$other->user_id.'&per_page=100&search=missing&order_status=cancelled');
             $response->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $order->id)
                 ->assertJsonPath('data.0.subtotal', '1200.00')->assertJsonPath('data.0.shipping_fee', '100.00')
@@ -60,10 +65,10 @@ class OrderApiTest extends TestCase
             ], array_keys($response->json('data.0')));
             $this->assertSame($order->created_at->toISOString(), $response->json('data.0.created_at'));
             $this->assertStringNotContainsString('秘密收件地址', $response->getContent());
-            foreach (DB::getQueryLog() as $query) {
+            foreach ($connection->getQueryLog() as $query) {
                 $this->assertStringNotContainsString('order_items', $query['query']);
             }
-            DB::disableQueryLog();
+            $connection->disableQueryLog();
         }
     }
 
@@ -114,5 +119,96 @@ class OrderApiTest extends TestCase
             $order->forceFill(['created_at' => $attributes['created_at']])->save();
         }
         return $order;
+    }
+
+    public function test_detail_requires_login_and_active_member(): void
+    {
+        $user = User::factory()->create(['status' => 'disabled']);
+        $order = $this->createOrder($user);
+        $this->getJson('/api/orders/'.$order->id)->assertUnauthorized();
+        config(['sanctum.stateful' => ['localhost']]);
+        Auth::forgetGuards();
+        $this->withHeader('Origin', 'http://localhost')->actingAs($user, 'web')
+            ->getJson('/api/orders/'.$order->id)->assertForbidden()->assertExactJson([
+                'code' => 'ACCOUNT_DISABLED', 'message' => '此會員帳號已停用，請聯絡管理員',
+            ]);
+    }
+
+    public function test_other_members_missing_and_non_numeric_orders_return_404(): void
+    {
+        $own = User::factory()->create();
+        $otherOrder = $this->createOrder(User::factory()->create());
+        $this->actingAs($own, 'web');
+        foreach ([$otherOrder->id, 999999, 'abc', '-1', '1.5'] as $id) {
+            $this->getJson('/api/orders/'.$id)->assertNotFound()->assertJsonMissingPath('data');
+        }
+    }
+
+    public function test_detail_keeps_snapshots_after_products_variants_and_address_book_change(): void
+    {
+        $user = User::factory()->create();
+        $category = Category::query()->create(['name' => '測試分類', 'status' => 'active']);
+        $product = Product::factory()->create(['category_id' => $category->id, 'name' => '現售商品', 'price' => '600.00']);
+        $variant = ProductVariant::query()->create(['product_id' => $product->id,
+            'option_name' => '重量', 'option_value' => '10kg', 'stock' => 5, 'status' => 'active']);
+        $district = City::query()->create(['name' => '臺北市'])->districts()->create(['name' => '中正區', 'postal_code' => '100']);
+        $address = $user->userAddresses()->create(['district_id' => $district->id, 'label' => '測試地址',
+            'recipient_name' => '秘密收件人', 'recipient_phone' => '0987654321', 'address' => '秘密收件地址', 'is_default' => true]);
+        $order = $this->createOrder($user);
+        foreach ([null, $variant->id] as $variantId) {
+            $order->items()->create(['product_id' => $product->id, 'product_variant_id' => $variantId,
+                'product_code_snapshot' => 'SNAP-001', 'product_name_snapshot' => '當時的商品名稱',
+                'variant_snapshot' => $variantId ? '重量：10kg' : null,
+                'unit_price' => '600.00', 'quantity' => 1, 'subtotal' => '600.00']);
+        }
+        $this->actingAs($user, 'web');
+        $before = $this->getJson('/api/orders/'.$order->id)->assertOk();
+        $before->assertJsonCount(2, 'data.items')->assertJsonPath('data.items.0.product_name', '當時的商品名稱')
+            ->assertJsonPath('data.items.0.variant', null)->assertJsonPath('data.items.1.variant', '重量：10kg')
+            ->assertJsonPath('data.items.1.unit_price', '600.00')->assertJsonPath('data.items.1.quantity', 1)
+            ->assertJsonPath('data.subtotal', '1200.00')->assertJsonPath('data.shipping_fee', '100.00')
+            ->assertJsonPath('data.total_amount', '1300.00')->assertJsonPath('data.logistics_company', null)
+            ->assertJsonPath('data.tracking_number', null)->assertJsonPath('data.recipient.address', '秘密收件地址')
+            ->assertJsonMissingPath('data.can_cancel')->assertJsonMissingPath('success');
+        $product->update(['name' => '後來的商品名稱', 'price' => '9999.00', 'status' => 'inactive']);
+        $variant->update(['option_value' => '20kg', 'status' => 'inactive']);
+        $address->update(['recipient_name' => '新收件人', 'address' => '新地址']);
+        $user->update(['name' => '新會員姓名', 'email' => 'new@example.test']);
+        $connection = DB::connection();
+        $connection->enableQueryLog();
+        $connection->flushQueryLog();
+        $after = $this->getJson('/api/orders/'.$order->id)->assertOk();
+        $this->assertSame($before->json('data'), $after->json('data'));
+        $queries = array_column($connection->getQueryLog(), 'query');
+        $connection->disableQueryLog();
+        $this->assertCount(1, array_filter($queries, fn ($query) => str_contains($query, 'order_items')));
+        foreach (['products', 'product_variants', 'user_addresses'] as $table) {
+            foreach ($queries as $query) $this->assertStringNotContainsString('from "'.$table.'"', $query);
+        }
+        $order->update(['logistics_company' => '測試物流', 'tracking_number' => 'TRACK-001']);
+        $this->getJson('/api/orders/'.$order->id)->assertOk()
+            ->assertJsonPath('data.logistics_company', '測試物流')->assertJsonPath('data.tracking_number', 'TRACK-001');
+    }
+
+    public function test_cod_and_mock_checkout_results_can_be_read_back_with_identical_contract(): void
+    {
+        config(['services.mock_credit_card.should_fail' => false]);
+        $district = City::query()->create(['name' => '臺北市'])->districts()->create(['name' => '中正區', 'postal_code' => '100']);
+        $category = Category::query()->create(['name' => '測試分類', 'status' => 'active']);
+        foreach (['cod', 'mock_credit_card'] as $method) {
+            Auth::forgetGuards();
+            $user = User::factory()->create();
+            $product = Product::factory()->create(['category_id' => $category->id, 'stock' => 10, 'price' => '600.00']);
+            $user->cart()->create()->items()->create(['product_id' => $product->id, 'quantity' => 2]);
+            $this->actingAs($user, 'web');
+            $created = $this->postJson('/api/checkout', [
+                'purchaser' => ['name' => '原訂購人', 'phone' => '0912345678', 'email' => 'fixture@example.test'],
+                'recipient' => ['name' => '原收件人', 'phone' => '0987654321', 'district_id' => $district->id, 'address' => '原地址'],
+                'shipping_method' => 'home_delivery', 'payment_method' => $method,
+            ])->assertCreated();
+            $detail = $this->getJson('/api/orders/'.$created->json('data.id'))->assertOk();
+            $this->assertSame($created->json('data'), $detail->json('data'));
+            $detail->assertJsonPath('data.payment_status', $method === 'cod' ? 'unpaid' : 'paid');
+        }
     }
 }
