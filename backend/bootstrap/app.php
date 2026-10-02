@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureAdminIsActive;
 use App\Http\Middleware\EnsureMemberIsActive;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -15,8 +16,12 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->statefulApi();
+        $middleware->redirectGuestsTo(
+            fn (Request $request) => $request->is('api/admin/*') ? null : route('login'),
+        );
         $middleware->alias([
             'member.active' => EnsureMemberIsActive::class,
+            'admin.active' => EnsureAdminIsActive::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
