@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
+import { adminRoutes, adminGuard } from './adminRoutes'
 
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
 import HomeView from '@/views/HomeView.vue'
@@ -22,6 +23,7 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
 
   routes: [
+    ...adminRoutes,
     {
       path: '/',
       component: DefaultLayout,
@@ -115,7 +117,9 @@ const router = createRouter({
   ],
 })
 
+router.beforeEach(adminGuard)
 router.beforeEach((to) => {
+  if (!to.meta.requiresAuth) return
   const authStore = useAuthStore()
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {

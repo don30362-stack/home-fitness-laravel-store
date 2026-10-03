@@ -6,6 +6,7 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createRenderer, nextTick, h } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import { createRouter, createMemoryHistory, RouterView } from 'vue-router'
 import axios from 'axios'
 
 // 與既有 orders 測試相同：真 SFC client render／記憶體 host，並非真瀏覽器。
@@ -15,12 +16,21 @@ globalThis.localStorage = {
   setItem: (key, value) => storage.set(key, value),
   removeItem: (key) => storage.delete(key),
 }
+const adminViews = {
+  AdminLoginView: '/src/views/admin/AdminLoginView.vue', AdminLayout: '/src/layouts/AdminLayout.vue',
+  AdminSidebar: '/src/components/admin/AdminSidebar.vue', AdminHeader: '/src/components/admin/AdminHeader.vue',
+  AdminPlaceholderView: '/src/views/admin/AdminPlaceholderView.vue', AdminNotFoundView: '/src/views/admin/AdminNotFoundView.vue',
+}
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', plugins: [{
   name: 'admin-test-sfc', enforce: 'pre',
-  resolveId(id) { if (id === 'virtual:admin-login') return '\0admin-login.ts' },
+  resolveId(id) {
+    const name = id === 'virtual:admin-login' ? 'AdminLoginView' : Object.keys(adminViews).find((name) => id.endsWith('/' + name + '.vue'))
+    if (name) return '\0admin-sfc:' + name + '.ts'
+  },
   async load(id) {
-    if (id !== '\0admin-login.ts') return
-    const source = await readFile(new URL('../src/views/admin/AdminLoginView.vue', import.meta.url), 'utf8')
+    const file = adminViews[id.replace(/^\0admin-sfc:/, '').replace(/\.ts$/, '')]
+    if (!file) return
+    const source = await readFile(new URL('..' + file, import.meta.url), 'utf8')
     return ts.transpileModule(compileScript(parse(source).descriptor, { id, inlineTemplate: true }).content,
       { compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext } }).outputText
   },
@@ -36,6 +46,7 @@ const { useCartStore } = await server.ssrLoadModule('/src/stores/cart.ts')
 const memberState = await server.ssrLoadModule('/src/services/sessionState.ts')
 const { default: memberApi } = await server.ssrLoadModule('/src/services/api.ts')
 const { default: Login } = await server.ssrLoadModule('virtual:admin-login')
+const routes = await server.ssrLoadModule('/src/router/adminRoutes.ts')
 const originalError = console.error
 console.error = () => {}
 after(async () => { console.error = originalError; await server.close() })
@@ -282,3 +293,163 @@ for (const [status, code, expected] of [[401, undefined, '帳號或密碼錯誤'
     assertMemberUntouched(); view.app.unmount()
   })
 }
+
+const memoryRouter = () => {
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    ...routes.adminRoutes, { path: '/', component: { render: () => h('div', '前台') } },
+  ] })
+  router.beforeEach(routes.adminGuard)
+  const lifecycle = routes.connectAdminNavigation(router)
+  return { router, lifecycle }
+}
+const mountRoute = async (url, instance = memoryRouter()) => {
+  await instance.router.push(url); await instance.router.isReady(); await instance.lifecycle.ready()
+  const root = node('root'), app = renderer.createApp({ render: () => h(RouterView) })
+  app.use(pinia); app.use(instance.router); app.mount(root); await settle()
+  return { ...instance, root, app }
+}
+
+for (const path of ['/admin/dashboard', '/admin/orders', '/admin/does-not-exist']) {
+  test(`guest/member-only ${path} 經真 guard 導登入；會員身分不等於 Admin`, async () => {
+    auth.currentAdmin = null
+    api.defaults.adapter = (config) => { calls.push(config); return Promise.reject(failure(config, 401)) }
+    const view = await mountRoute(path)
+    assert.equal(view.router.currentRoute.value.name, 'admin-login')
+    assert.equal(view.router.currentRoute.value.query.redirect, path)
+    assert.equal(calls.length, 1); assert.ok(text(view.root).includes('管理員登入'))
+    assertMemberUntouched(); view.app.unmount()
+  })
+}
+test('Admin-only 可進八頁正式骨架，Sidebar/Header/RouterView、階段對照正確且零業務 API', async () => {
+  auth.isAdminInitialized = true; member.currentUser = null
+  const view = await mountRoute('/admin')
+  assert.equal(view.router.currentRoute.value.fullPath, '/admin/dashboard')
+  assert.ok(find(view.root, (el) => el.type === 'header'))
+  assert.ok(find(view.root, (el) => el.type === 'aside'))
+  assert.ok(text(view.root).includes(admin.email))
+  for (const item of routes.adminModules) {
+    const anchor = find(view.root, (el) => el.type === 'a' && el.props.href === '/admin/' + item.path)
+    assert.ok(anchor, item.path)
+    await view.router.push('/admin/' + item.path); await settle()
+    const main = find(view.root, (el) => el.type === 'main')
+    assert.ok(text(main).includes(item.title)); assert.ok(text(main).includes('尚未實作'))
+    assert.ok(text(main).includes('Stage ' + item.stage))
+  }
+  assert.deepEqual(routes.adminModules.map((item) => item.stage), [24, 19, 20, 19, 21, 21, 22, 23])
+  assert.equal(calls.length, 0); assert.equal(member.currentUser, null)
+  const frontLink = find(view.root, (el) => el.type === 'a' && el.props.href === '/')
+  assert.ok(frontLink); assert.equal(frontLink.props.onClick, undefined)
+  const menu = find(view.root, (el) => el.type === 'button' && text(el) === '選單')
+  assert.equal(menu.props['aria-expanded'], false); menu.props.onClick(); await nextTick()
+  assert.equal(menu.props['aria-expanded'], true)
+  view.app.unmount()
+})
+test('reload protected child 先等待 restore，再放行而非先導 login', async () => {
+  auth.currentAdmin = null
+  let finish
+  api.defaults.adapter = (config) => new Promise((resolve) => { calls.push(config); finish = () => resolve(response(config, { data: admin })) })
+  const instance = memoryRouter(), pending = instance.router.push('/admin/orders')
+  await settle(); assert.equal(calls.length, 1); assert.equal(instance.router.currentRoute.value.name, undefined)
+  finish(); await pending
+  assert.equal(instance.router.currentRoute.value.name, 'admin-orders'); assert.equal(auth.isAdminAuthenticated, true)
+})
+test('disabled protected child 導 login 並保留後端原因', async () => {
+  auth.currentAdmin = null
+  api.defaults.adapter = (config) => Promise.reject(failure(config, 403, 'ADMIN_ACCOUNT_DISABLED'))
+  const view = await mountRoute('/admin/orders')
+  assert.equal(view.router.currentRoute.value.name, 'admin-login')
+  assert.ok(text(view.root).includes('後端停用原因')); assert.equal(auth.adminFailureReason, 'disabled')
+  view.app.unmount()
+})
+for (const status of [undefined, 419, 500]) {
+  test(`protected restore ${status ?? 'network'} 保留 URL、不呈現業務 child；可重試`, async () => {
+    auth.currentAdmin = null
+    api.defaults.adapter = (config) => Promise.reject(failure(config, status))
+    const view = await mountRoute('/admin/products')
+    assert.equal(view.router.currentRoute.value.fullPath, '/admin/products')
+    assert.ok(text(view.root).includes('無法恢復管理員登入狀態'))
+    assert.equal(find(view.root, (el) => el.type === 'header'), undefined)
+    assert.equal(find(view.root, (el) => el.type === 'main'), undefined)
+    api.defaults.adapter = async (config) => response(config, { data: admin })
+    await find(view.root, (el) => el.type === 'button' && text(el) === '重試').props.onClick(); await settle()
+    assert.equal(view.router.currentRoute.value.name, 'admin-products')
+    assert.ok(text(view.root).includes('尚未實作')); view.app.unmount()
+  })
+}
+test('已初始化有效 Admin 開 login 導 dashboard', async () => {
+  auth.isAdminInitialized = true
+  const view = await mountRoute('/admin/login')
+  assert.equal(view.router.currentRoute.value.name, 'admin-dashboard'); assert.equal(calls.length, 0)
+  view.app.unmount()
+})
+for (const outcome of ['authenticated', 'guest', 'disabled', 'temporary']) {
+  test(`login guard 未初始化 restore ${outcome} 的合理結果`, async () => {
+    auth.currentAdmin = null
+    api.defaults.adapter = (config) => outcome === 'authenticated' ? Promise.resolve(response(config, { data: admin }))
+      : Promise.reject(failure(config, outcome === 'guest' ? 401 : outcome === 'disabled' ? 403 : 500,
+        outcome === 'disabled' ? 'ADMIN_ACCOUNT_DISABLED' : undefined))
+    const view = await mountRoute('/admin/login')
+    assert.equal(view.router.currentRoute.value.name, outcome === 'authenticated' ? 'admin-dashboard' : 'admin-login')
+    if (outcome === 'disabled') assert.ok(text(view.root).includes('後端停用原因'))
+    if (outcome === 'temporary') {
+      assert.ok(text(view.root).includes('無法恢復管理員登入狀態'))
+      api.defaults.adapter = async (config) => response(config, { data: admin })
+      await find(view.root, (el) => el.type === 'button' && text(el) === '重試').props.onClick(); await settle()
+      assert.equal(view.router.currentRoute.value.name, 'admin-dashboard')
+    }
+    view.app.unmount()
+  })
+}
+test('safe redirect 拒絕外站、會員、login、相對穿越等；合法保留 query', () => {
+  assert.equal(routes.safeAdminRedirect('/admin/orders?page=2'), '/admin/orders?page=2')
+  for (const value of ['https://evil.com', '//evil.com', '/member', '/admin/login', '/admin/login?redirect=x', '/admin/login/',
+    '/admin/../member', '/admin/%6cogin', '/admin/\\evil.com', undefined, ['/admin/orders']]) {
+    assert.equal(routes.safeAdminRedirect(value), '/admin/dashboard')
+  }
+})
+for (const redirect of ['/admin/orders', 'https://evil.com', '//evil.com', '/member', '/admin/login']) {
+  test(`真 Router loginSucceeded callback 使用安全 redirect：${redirect}`, async () => {
+    auth.currentAdmin = null; auth.isAdminInitialized = true
+    const view = await mountRoute('/admin/login?redirect=' + encodeURIComponent(redirect))
+    await auth.login(payload); await navigation.notifyAdminLoginSuccess(); await settle()
+    assert.equal(view.router.currentRoute.value.fullPath, redirect === '/admin/orders' ? redirect : '/admin/dashboard')
+    view.app.unmount()
+  })
+}
+for (const status of [200, 401, 500, undefined]) {
+  test(`Header logout ${status ?? 'network'} 真操作與 Router 導頁／錯誤`, async () => {
+    auth.isAdminInitialized = true
+    const view = await mountRoute('/admin/dashboard')
+    api.defaults.adapter = (config) => { calls.push(config); return status === 200 ? Promise.resolve(response(config, { message: '成功' }))
+      : Promise.reject(failure(config, status)) }
+    await find(view.root, (el) => el.type === 'button' && text(el) === '登出').props.onClick(); await settle()
+    if (status === 200 || status === 401) {
+      assert.equal(view.router.currentRoute.value.name, 'admin-login'); assert.equal(auth.currentAdmin, null)
+    } else {
+      assert.equal(view.router.currentRoute.value.name, 'admin-dashboard'); assert.ok(text(view.root).includes('登出失敗'))
+      assert.equal(auth.currentAdmin.id, admin.id)
+    }
+    assert.equal(calls.length, 1); assertMemberUntouched(); view.app.unmount()
+  })
+}
+test('未知 Admin URL 使用 Admin 專用 NotFound，保留後台框架', async () => {
+  auth.isAdminInitialized = true
+  const view = await mountRoute('/admin/does-not-exist')
+  assert.equal(view.router.currentRoute.value.name, 'admin-not-found')
+  assert.ok(text(view.root).includes('找不到後台頁面')); assert.ok(find(view.root, (el) => el.type === 'aside'))
+  assert.equal(calls.length, 0); view.app.unmount()
+})
+test('正式 bootstrap helper：admin 不 restore 會員；前台仍走真會員 restore 流程', async () => {
+  let memberRestoreCalls = 0
+  const memberCalls = []
+  memberApi.defaults.adapter = async (config) => { memberCalls.push(config.url); return response(config,
+    { data: config.url === '/cart' ? { items: [], item_count: 0, has_unavailable_items: false } : user }) }
+  const restoreMember = async () => { memberRestoreCalls++; await member.restoreAuth() }
+  await bootstrap.restoreInitialIdentity('/admin/orders', pinia, restoreMember)
+  assert.equal(memberRestoreCalls, 0); assert.equal(calls.length, 1); assert.deepEqual(memberCalls, [])
+  calls.length = 0
+  await bootstrap.restoreInitialIdentity('/member/orders', pinia, restoreMember)
+  assert.equal(memberRestoreCalls, 1); assert.equal(calls.length, 0); assert.deepEqual(memberCalls, ['/me', '/cart'])
+  const mainSource = await readFile(new URL('../src/main.ts', import.meta.url), 'utf8')
+  assert.ok(mainSource.includes('restoreInitialIdentity(window.location.pathname'))
+})

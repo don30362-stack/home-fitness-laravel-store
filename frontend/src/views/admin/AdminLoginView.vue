@@ -45,12 +45,15 @@ const submit = async () => {
   }
 }
 const retryRestore = async () => {
-  try { await auth.restoreAdmin() } catch { /* store 保留恢復失敗提示 */ }
+  try {
+    await auth.restoreAdmin()
+    if (auth.isAdminAuthenticated) await notifyAdminLoginSuccess()
+  } catch { /* store 保留恢復失敗提示 */ }
 }
 </script>
 
 <template>
-  <section class="container py-5" style="max-width: 480px">
+  <section class="admin-login container py-5" style="max-width: 480px">
     <h1 class="h3 mb-4">管理員登入</h1>
     <div v-if="auth.restoreError" class="alert alert-warning" role="alert">
       {{ auth.restoreError }}

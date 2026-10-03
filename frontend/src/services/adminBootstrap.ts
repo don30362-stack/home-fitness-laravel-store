@@ -14,3 +14,7 @@ export const restoreInitialAdmin = async (path: string, pinia: Pinia): Promise<b
   }
   return true
 }
+
+export const restoreInitialIdentity = async (pathname: string, pinia: Pinia, restoreMember: () => Promise<void>) => {
+  if (!await restoreInitialAdmin(pathname, pinia)) await restoreMember()
+}
