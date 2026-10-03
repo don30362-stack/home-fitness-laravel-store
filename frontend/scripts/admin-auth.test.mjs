@@ -11,6 +11,9 @@ import axios from 'axios'
 
 // 與既有 orders 測試相同：真 SFC client render／記憶體 host，並非真瀏覽器。
 const storage = new Map()
+// Memory host 提供 v-model 更新時的 DOM 型別邊界；不是瀏覽器驗收。
+globalThis.Document = class Document {}
+globalThis.ShadowRoot = class ShadowRoot {}
 globalThis.localStorage = {
   getItem: (key) => storage.get(key) ?? null,
   setItem: (key, value) => storage.set(key, value),
@@ -20,6 +23,8 @@ const adminViews = {
   AdminLoginView: '/src/views/admin/AdminLoginView.vue', AdminLayout: '/src/layouts/AdminLayout.vue',
   AdminSidebar: '/src/components/admin/AdminSidebar.vue', AdminHeader: '/src/components/admin/AdminHeader.vue',
   AdminPlaceholderView: '/src/views/admin/AdminPlaceholderView.vue', AdminNotFoundView: '/src/views/admin/AdminNotFoundView.vue',
+  ProductManagementView: '/src/views/admin/ProductManagementView.vue', AdminProductDetailView: '/src/views/admin/AdminProductDetailView.vue',
+  AppPagination: '/src/components/common/AppPagination.vue',
 }
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', plugins: [{
   name: 'admin-test-sfc', enforce: 'pre',
@@ -57,6 +62,20 @@ const user = { id: 9, name: '會員', email: 'member@example.test', phone: '0912
 const payload = { email: admin.email, password: 'test-only' }
 const key = 'home-fitness-store-guest-cart'
 const guest = JSON.stringify([{ key: '99:none', product_id: 99, product_variant_id: null, quantity: 1 }])
+const categoryOptions = [{ id: 1, name: '器材', children: [{ id: 2, name: '啞鈴' }] }]
+const productItem = {
+  id: 1, product_code: 'PRD-EXISTING', name: '測試啞鈴', category: { id: 2, name: '啞鈴', status: 'inactive' },
+  price: '1234.50', stock: null, has_variants: true, low_stock_threshold: 5, status: 'inactive',
+  created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
+}
+const productPage = (data = [productItem], page = 1, lastPage = 2) => ({ data,
+  links: { first: '?page=1', last: `?page=${lastPage}`, prev: null, next: '?page=2' },
+  meta: { current_page: page, last_page: lastPage, per_page: 10, total: data.length ? 11 : 0 } })
+const productDetail = { ...productItem, category: { ...productItem.category, parent: { id: 1, name: '器材', status: 'active' } },
+  short_description: '短介', description: '完整詳細文字', images: [{ id: 1, image_path: 'products/read.jpg',
+    image_url: 'http://localhost/storage/products/read.jpg', image_type: 'detail', is_primary: true, sort_order: 2 }],
+  specifications: [{ id: 1, spec_name: '材質', spec_value: '鋼材', sort_order: 0 }],
+  variants: [{ id: 1, option_name: '顏色', option_value: '黑色', stock: 3, status: 'inactive' }] }
 const response = (config, data, status = 200) => ({ config, data, status, statusText: '', headers: {} })
 const failure = (config, status, code) => new axios.AxiosError('test error', status ? 'ERR_BAD_RESPONSE' : 'ERR_NETWORK', config, undefined,
   status ? response(config, { message: '後端停用原因', ...(code ? { code } : {}) }, status) : undefined)
@@ -75,6 +94,9 @@ beforeEach(() => {
   memberApi.defaults.adapter = async (config) => response(config, { data: user })
   api.defaults.adapter = async (config) => {
     calls.push(config)
+    if (config.url === '/categories') return response(config, { data: categoryOptions })
+    if (config.url === '/admin/products') return response(config, productPage())
+    if (config.url.startsWith('/admin/products/')) return response(config, { data: productDetail })
     return response(config, config.url.endsWith('/csrf-cookie') ? {} : { data: admin, message: '登入成功' })
   }
 })
@@ -240,6 +262,8 @@ test('bootstrap helper 僅 admin namespace restore；前台不觸發 Admin API',
 })
 
 const node = (type, text = '') => ({ type, tagName: type.toUpperCase(), text, props: {}, children: [], parent: null,
+  getRootNode: () => ({ activeElement: null }),
+  get options() { const collect = (el) => el.children.flatMap(child => child.type === 'option' ? [child] : collect(child)); return collect(this) },
   value: '', listeners: {}, addEventListener(event, handler) { this.listeners[event] = handler }, removeEventListener(event) { delete this.listeners[event] } })
 const renderer = createRenderer({
   createElement: (type) => node(type), createText: (text) => node('text', text), createComment: () => node('comment'),
@@ -309,7 +333,7 @@ const mountRoute = async (url, instance = memoryRouter()) => {
   return { ...instance, root, app }
 }
 
-for (const path of ['/admin/dashboard', '/admin/orders', '/admin/does-not-exist']) {
+for (const path of ['/admin/dashboard', '/admin/orders', '/admin/does-not-exist', '/admin/products', '/admin/products/1']) {
   test(`guest/member-only ${path} 經真 guard 導登入；會員身分不等於 Admin`, async () => {
     auth.currentAdmin = null
     api.defaults.adapter = (config) => { calls.push(config); return Promise.reject(failure(config, 401)) }
@@ -320,7 +344,7 @@ for (const path of ['/admin/dashboard', '/admin/orders', '/admin/does-not-exist'
     assertMemberUntouched(); view.app.unmount()
   })
 }
-test('Admin-only 可進八頁正式骨架，Sidebar/Header/RouterView、階段對照正確且零業務 API', async () => {
+test('Admin-only 八模組保持階段對照，只有 products 已有唯讀 API', async () => {
   auth.isAdminInitialized = true; member.currentUser = null
   const view = await mountRoute('/admin')
   assert.equal(view.router.currentRoute.value.fullPath, '/admin/dashboard')
@@ -332,11 +356,12 @@ test('Admin-only 可進八頁正式骨架，Sidebar/Header/RouterView、階段�
     assert.ok(anchor, item.path)
     await view.router.push('/admin/' + item.path); await settle()
     const main = find(view.root, (el) => el.type === 'main')
-    assert.ok(text(main).includes(item.title)); assert.ok(text(main).includes('尚未實作'))
-    assert.ok(text(main).includes('Stage ' + item.stage))
+    assert.ok(text(main).includes(item.title))
+    if (item.path === 'products') assert.ok(!text(main).includes('尚未實作'))
+    else { assert.ok(text(main).includes('尚未實作')); assert.ok(text(main).includes('Stage ' + item.stage)) }
   }
   assert.deepEqual(routes.adminModules.map((item) => item.stage), [24, 19, 20, 19, 21, 21, 22, 23])
-  assert.equal(calls.length, 0); assert.equal(member.currentUser, null)
+  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/products', '/categories']); assert.equal(member.currentUser, null)
   const frontLink = find(view.root, (el) => el.type === 'a' && el.props.href === '/')
   assert.ok(frontLink); assert.equal(frontLink.props.onClick, undefined)
   const menu = find(view.root, (el) => el.type === 'button' && text(el) === '選單')
@@ -370,10 +395,11 @@ for (const status of [undefined, 419, 500]) {
     assert.ok(text(view.root).includes('無法恢復管理員登入狀態'))
     assert.equal(find(view.root, (el) => el.type === 'header'), undefined)
     assert.equal(find(view.root, (el) => el.type === 'main'), undefined)
-    api.defaults.adapter = async (config) => response(config, { data: admin })
+    api.defaults.adapter = async (config) => response(config, config.url === '/admin/products' ? productPage()
+      : { data: config.url === '/categories' ? categoryOptions : admin })
     await find(view.root, (el) => el.type === 'button' && text(el) === '重試').props.onClick(); await settle()
     assert.equal(view.router.currentRoute.value.name, 'admin-products')
-    assert.ok(text(view.root).includes('尚未實作')); view.app.unmount()
+    assert.ok(text(view.root).includes(productItem.name)); view.app.unmount()
   })
 }
 test('已初始化有效 Admin 開 login 導 dashboard', async () => {
@@ -452,4 +478,144 @@ test('正式 bootstrap helper：admin 不 restore 會員；前台仍走真會員
   assert.equal(memberRestoreCalls, 1); assert.equal(calls.length, 0); assert.deepEqual(memberCalls, ['/me', '/cart'])
   const mainSource = await readFile(new URL('../src/main.ts', import.meta.url), 'utf8')
   assert.ok(mainSource.includes('restoreInitialIdentity(window.location.pathname'))
+})
+
+const productsView = async (url = '/admin/products') => {
+  auth.isAdminInitialized = true
+  return mountRoute(url)
+}
+const submitProductFilters = async (view, values) => {
+  for (const [id, value] of Object.entries(values)) {
+    const input = find(view.root, el => el.props.id === id)
+    input.value = value
+    if (input.type === 'select') {
+      for (const option of input.options) option.selected = option.value === value
+      input.listeners.change({ target: input })
+    } else input.listeners.input({ target: input })
+  }
+  await nextTick()
+  find(view.root, el => el.type === 'form').props.onSubmit({ preventDefault() {} })
+  await settle()
+}
+const assertReadOnlyProductCalls = () => {
+  assert.ok(calls.every(c => c.method === 'get'))
+  assert.ok(calls.every(c => c.url === '/categories' || /^\/admin\/products(?:\/\d+)?$/.test(c.url)))
+  assert.ok(!calls.some(c => c.url === '/admin/categories'))
+  assertMemberUntouched()
+}
+
+test('商品頁替換 placeholder，列表唯讀、detail入口、分類只用公開endpoint', async () => {
+  const view = await productsView()
+  const main = find(view.root, el => el.type === 'main')
+  assert.ok(text(main).includes(productItem.name)); assert.ok(text(main).includes('依購買規格管理'))
+  assert.ok(!text(main).includes('尚未實作')); assert.ok(!text(main).includes('新增商品'))
+  const link = find(main, el => el.type === 'a' && el.props.href === '/admin/products/1')
+  assert.ok(link); assertReadOnlyProductCalls(); view.app.unmount()
+})
+test('商品 initial loading，完成後顯示結果', async () => {
+  let finish
+  api.defaults.adapter = config => { calls.push(config); return config.url === '/categories'
+    ? Promise.resolve(response(config, { data: categoryOptions }))
+    : new Promise(resolve => { finish = () => resolve(response(config, productPage())) }) }
+  const view = await productsView(); assert.ok(text(view.root).includes('商品載入中'))
+  finish(); await settle(); assert.ok(text(view.root).includes(productItem.name)); view.app.unmount()
+})
+test('商品 empty 與 URL query reload／重建，切頁保留條件', async () => {
+  api.defaults.adapter = async config => { calls.push(config); return response(config, config.url === '/categories'
+    ? { data: categoryOptions } : productPage([], Number(config.params.page), 2)) }
+  const view = await productsView('/admin/products?search=啞鈴&category_id=2&status=inactive&page=2')
+  assert.ok(text(view.root).includes('沒有符合條件'))
+  assert.deepEqual(calls.find(c => c.url === '/admin/products').params, { search: '啞鈴', category_id: '2', status: 'inactive', page: '2' })
+  assert.equal(find(view.root, el => el.props.id === 'product-search').value, '啞鈴')
+  const previous = find(view.root, el => el.type === 'button' && text(el).trim() === '上一頁')
+  previous.props.onClick(); await settle()
+  assert.deepEqual({ ...view.router.currentRoute.value.query }, { search: '啞鈴', category_id: '2', status: 'inactive', page: '1' })
+  assertReadOnlyProductCalls(); view.app.unmount()
+})
+test('搜尋／分類／status 提交回 page=1，back-forward 還原條件並重新GET', async () => {
+  const view = await productsView('/admin/products?search=舊條件&page=2')
+  await submitProductFilters(view, { 'product-search': 'PRD-EXISTING', 'product-category': '2', 'product-status': 'inactive' })
+  assert.deepEqual({ ...view.router.currentRoute.value.query }, { search: 'PRD-EXISTING', category_id: '2', status: 'inactive', page: '1' })
+  assert.deepEqual(calls.filter(c => c.url === '/admin/products').at(-1).params, { search: 'PRD-EXISTING', category_id: '2', status: 'inactive', page: '1' })
+  view.router.back(); await settle()
+  assert.equal(view.router.currentRoute.value.query.search, '舊條件')
+  assert.equal(find(view.root, el => el.props.id === 'product-search').value, '舊條件')
+  view.router.forward(); await settle(); assert.equal(view.router.currentRoute.value.query.status, 'inactive')
+  assertReadOnlyProductCalls(); view.app.unmount()
+})
+for (const status of [403, 419, undefined, 500, 422]) {
+  test(`商品 ${status ?? 'network'} 不誤判停用、不自動重送，可手動 retry`, async () => {
+    api.defaults.adapter = config => { calls.push(config); return config.url === '/categories'
+      ? Promise.resolve(response(config, { data: categoryOptions })) : Promise.reject(failure(config, status)) }
+    const view = await productsView()
+    assert.ok(find(view.root, el => el.props.role === 'alert'))
+    assert.equal(auth.currentAdmin.id, admin.id); assert.equal(auth.adminFailureReason, null)
+    assert.equal(view.router.currentRoute.value.name, 'admin-products')
+    assert.equal(calls.filter(c => c.url === '/admin/products').length, 1)
+    api.defaults.adapter = async config => { calls.push(config); return response(config, productPage()) }
+    await find(view.root, el => el.type === 'button' && text(el) === '重試').props.onClick(); await settle()
+    assert.ok(text(view.root).includes(productItem.name))
+    assert.equal(calls.filter(c => c.url === '/admin/products').length, 2)
+    assertReadOnlyProductCalls(); view.app.unmount()
+  })
+}
+for (const [status, code] of [[401, undefined], [403, 'ADMIN_ACCOUNT_DISABLED']]) {
+  test(`商品 ${status}/${code ?? ''} 沿用Admin失效流程，會員不受影響`, async () => {
+    api.defaults.adapter = config => { calls.push(config); return config.url === '/categories'
+      ? Promise.resolve(response(config, { data: categoryOptions })) : Promise.reject(failure(config, status, code)) }
+    const view = await productsView(); await settle()
+    assert.equal(view.router.currentRoute.value.name, 'admin-login'); assert.equal(auth.currentAdmin, null)
+    if (code) assert.ok(text(view.root).includes('後端停用原因'))
+    assertReadOnlyProductCalls(); view.app.unmount()
+  })
+}
+test('分類選項失敗可獨立重試，不請求Admin categories或清會員', async () => {
+  api.defaults.adapter = config => { calls.push(config); return config.url === '/categories'
+    ? Promise.reject(failure(config, 500)) : Promise.resolve(response(config, productPage())) }
+  const view = await productsView(); assert.ok(text(view.root).includes('分類選項載入失敗'))
+  api.defaults.adapter = async config => { calls.push(config); return response(config, { data: categoryOptions }) }
+  await find(view.root, el => el.type === 'button' && text(el) === '重試分類').props.onClick(); await settle()
+  assert.ok(!text(view.root).includes('分類選項載入失敗')); assertReadOnlyProductCalls(); view.app.unmount()
+})
+test('商品查詢舊成功與舊失敗均不可覆蓋新条件結果', async () => {
+  const pending = []
+  api.defaults.adapter = config => { calls.push(config); return config.url === '/categories'
+    ? Promise.resolve(response(config, { data: categoryOptions }))
+    : new Promise((resolve, reject) => pending.push({ config, resolve, reject })) }
+  const view = await productsView('/admin/products?search=old')
+  await view.router.push('/admin/products?search=middle'); await settle()
+  await view.router.push('/admin/products?search=new'); await settle()
+  pending[2].resolve(response(pending[2].config, productPage([{ ...productItem, name: '最新結果' }])))
+  await settle()
+  pending[0].resolve(response(pending[0].config, productPage([{ ...productItem, name: '舊結果' }])))
+  pending[1].reject(failure(pending[1].config, 500)); await settle()
+  assert.ok(text(view.root).includes('最新結果')); assert.ok(!text(view.root).includes('舊結果'))
+  assert.equal(find(view.root, el => el.props.role === 'alert'), undefined)
+  assertReadOnlyProductCalls(); view.app.unmount()
+})
+test('商品 detail route唯讀顯示完整內容，inactive category仍可讀，列表query可返回', async () => {
+  const view = await productsView('/admin/products/1?status=inactive&page=2')
+  const main = find(view.root, el => el.type === 'main')
+  for (const label of ['完整詳細文字', '短介', '器材', '啞鈴', 'inactive', '鋼材', '黑色', '庫存 3', '主圖', 'detail', '排序 2']) assert.ok(text(main).includes(label), label)
+  assert.equal(find(main, el => el.type === 'img').props.src, productDetail.images[0].image_url)
+  assert.ok(find(main, el => el.type === 'a' && el.props.href === '/admin/products?status=inactive&page=2'))
+  assert.ok(!text(main).includes('編輯儲存')); assertReadOnlyProductCalls(); view.app.unmount()
+})
+test('商品詳細404呈現不可取得，reload URL仍重新GET', async () => {
+  api.defaults.adapter = config => { calls.push(config); return Promise.reject(failure(config, 404)) }
+  const view = await productsView('/admin/products/999'); assert.ok(text(view.root).includes('商品不存在或無法取得'))
+  assert.equal(calls[0].url, '/admin/products/999'); view.app.unmount()
+  api.defaults.adapter = async config => { calls.push(config); return response(config, { data: productDetail }) }
+  const reopened = await productsView('/admin/products/1'); assert.ok(text(reopened.root).includes('完整詳細文字'))
+  assert.equal(calls.at(-1).url, '/admin/products/1'); reopened.app.unmount(); assertReadOnlyProductCalls()
+})
+test('快速切換詳細id，晚到舊商品不可覆蓋目前商品', async () => {
+  const pending = []
+  api.defaults.adapter = config => new Promise(resolve => pending.push({ config, resolve }))
+  const view = await productsView('/admin/products/1')
+  await view.router.push('/admin/products/2'); await settle()
+  pending[1].resolve(response(pending[1].config, { data: { ...productDetail, id: 2, name: '第二商品' } })); await settle()
+  pending[0].resolve(response(pending[0].config, { data: productDetail })); await settle()
+  assert.ok(text(view.root).includes('第二商品')); assert.ok(!text(view.root).includes(productItem.name))
+  assertMemberUntouched(); view.app.unmount()
 })

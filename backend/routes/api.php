@@ -12,6 +12,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AddressController;
 use App\Http\Controllers\Api\AdminAuthController;
+use App\Http\Controllers\Api\AdminProductController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CartController;
 use App\Http\Controllers\Api\CheckoutController;
@@ -47,6 +48,10 @@ Route::prefix('admin')->group(function () {
     Route::middleware('auth:admin')->group(function () {
         Route::post('/logout', [AdminAuthController::class, 'logout']);
         Route::get('/me', [AdminAuthController::class, 'me'])->middleware('admin.active');
+        Route::middleware('admin.active')->group(function () {
+            Route::get('/products', [AdminProductController::class, 'index']);
+            Route::get('/products/{id}', [AdminProductController::class, 'show'])->whereNumber('id');
+        });
     });
 });
 

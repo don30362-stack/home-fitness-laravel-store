@@ -4,6 +4,8 @@ import AdminLayout from '@/layouts/AdminLayout.vue'
 import AdminLoginView from '@/views/admin/AdminLoginView.vue'
 import AdminPlaceholderView from '@/views/admin/AdminPlaceholderView.vue'
 import AdminNotFoundView from '@/views/admin/AdminNotFoundView.vue'
+import ProductManagementView from '@/views/admin/ProductManagementView.vue'
+import AdminProductDetailView from '@/views/admin/AdminProductDetailView.vue'
 import { setAdminNavigationCallbacks } from '@/services/adminSessionNavigation'
 
 export const adminModules = [
@@ -35,9 +37,11 @@ export const adminRoutes: RouteRecordRaw[] = [
     children: [
       { path: '', redirect: '/admin/dashboard' },
       ...adminModules.map((module) => ({
-        path: module.path, name: 'admin-' + module.path, component: AdminPlaceholderView,
-        props: { title: module.title, stage: module.stage }, meta: { requiresAdmin: true },
+        path: module.path, name: 'admin-' + module.path,
+        component: module.path === 'products' ? ProductManagementView : AdminPlaceholderView,
+        props: module.path === 'products' ? undefined : { title: module.title, stage: module.stage }, meta: { requiresAdmin: true },
       })),
+      { path: 'products/:id', name: 'admin-product-detail', component: AdminProductDetailView, meta: { requiresAdmin: true } },
       { path: ':pathMatch(.*)*', name: 'admin-not-found', component: AdminNotFoundView, meta: { requiresAdmin: true } },
     ],
   },
