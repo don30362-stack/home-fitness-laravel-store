@@ -15,7 +15,7 @@ class AdminProductService
 {
     private const BASIC_FIELDS = ['category_id', 'name', 'price', 'short_description', 'description', 'low_stock_threshold'];
 
-    public function __construct(private readonly ProductCodeGenerator $codes) {}
+    public function __construct(private readonly ProductCodeGenerator $codes, private readonly ProductImageStorage $files) {}
 
     public function create(array $data): Product
     {
@@ -140,10 +140,15 @@ class AdminProductService
             if ($product->orderItems()->exists()) {
                 $this->reject('product', '商品已有歷史訂單，不能實體刪除；請改為下架或停用。');
             }
+            $images = $product->images()->orderBy('id')->lockForUpdate()->get();
             if (! $product->delete()) {
                 throw new RuntimeException('無法刪除商品。');
             }
-            // 本步只處理DB CASCADE，實體圖片清理由Step3接入。
+            DB::afterCommit(function () use ($images, $id) {
+                foreach ($images as $image) {
+                    $this->files->cleanup($id, $image->id, $image->image_path, 'product_delete');
+                }
+            });
         }, 3);
     }
 

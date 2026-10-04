@@ -3,6 +3,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import ProductForm from '@/components/admin/ProductForm.vue'
+import ProductImageManager from '@/components/admin/ProductImageManager.vue'
 import {
   getAdminProduct,
   getProductCategoryOptions,
@@ -25,6 +26,7 @@ const loading = ref(true),
   loadError = ref(''),
   saveError = ref('')
 const errors = ref<Record<string, string[]>>({})
+const imageBusy = ref(false)
 let sequence = 0
 const load = async () => {
   const current = ++sequence
@@ -34,6 +36,7 @@ const load = async () => {
   saveError.value = ''
   errors.value = {}
   submitting.value = false
+  imageBusy.value = false
   const id = route.params.id
   try {
     const [options, detail] = await Promise.all([
@@ -53,7 +56,7 @@ const load = async () => {
   }
 }
 const save = async (payload: CreateAdminProductPayload | UpdateAdminProductPayload) => {
-  if (submitting.value || loading.value) return
+  if (submitting.value || imageBusy.value || loading.value) return
   const current = sequence,
     id = route.params.id
   submitting.value = true
@@ -98,10 +101,19 @@ onBeforeUnmount(() => {
         :key="String(route.params.id ?? 'new')"
         :product="product"
         :categories="categories"
-        :submitting="submitting"
+        :submitting="submitting || imageBusy"
         :errors="errors"
         @save="save"
       />
+      <ProductImageManager
+        v-if="product"
+        :key="product.id"
+        :product-id="product.id"
+        :initial-images="product.images"
+        :disabled="submitting"
+        @busy="imageBusy = $event"
+      />
+      <p v-else class="mt-3">請先建立商品，再於編輯頁管理圖片。不強制上傳圖片。</p>
     </template>
   </section>
 </template>

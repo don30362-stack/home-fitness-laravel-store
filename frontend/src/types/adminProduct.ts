@@ -96,3 +96,15 @@ export interface UpdateAdminProductPayload extends Partial<AdminProductFields> {
 export interface UpdateAdminProductStatusPayload {
   status: ProductStatus
 }
+
+export interface AdminProductImageUpload {
+  image: File
+  image_type: 'gallery' | 'detail'
+  sort_order: number
+  is_primary?: boolean
+}
+export interface UpdateAdminProductImagePayload {
+  image_type?: 'gallery' | 'detail'
+  sort_order?: number
+  is_primary?: boolean
+}

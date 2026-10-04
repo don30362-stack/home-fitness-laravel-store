@@ -5,6 +5,9 @@ import type {
   AdminProductDetail,
   AdminProductListResponse,
   AdminProductQuery,
+  AdminProductImage,
+  AdminProductImageUpload,
+  UpdateAdminProductImagePayload,
 } from '@/types/adminProduct'
 import type {
   CreateAdminProductPayload,
@@ -46,3 +49,33 @@ export const updateAdminProductStatus = async (
   ).data
 export const deleteAdminProduct = async (id: string): Promise<ApiMessageOnlyResponse> =>
   (await adminApi.delete<ApiMessageOnlyResponse>(`/admin/products/${id}`)).data
+
+export const uploadAdminProductImage = async (
+  productId: number,
+  payload: AdminProductImageUpload,
+): Promise<ApiMessageResponse<AdminProductImage>> => {
+  const body = new FormData()
+  body.append('image', payload.image)
+  body.append('image_type', payload.image_type)
+  body.append('sort_order', String(payload.sort_order))
+  if (payload.is_primary !== undefined) body.append('is_primary', payload.is_primary ? '1' : '0')
+  // boundary由瀏覽器/Axios產生，不手動指定Content-Type。
+  return (
+    await adminApi.post<ApiMessageResponse<AdminProductImage>>(
+      `/admin/products/${productId}/images`,
+      body,
+    )
+  ).data
+}
+export const updateAdminProductImage = async (
+  imageId: number,
+  payload: UpdateAdminProductImagePayload,
+): Promise<ApiMessageResponse<AdminProductImage>> =>
+  (
+    await adminApi.patch<ApiMessageResponse<AdminProductImage>>(
+      `/admin/product-images/${imageId}`,
+      payload,
+    )
+  ).data
+export const deleteAdminProductImage = async (imageId: number): Promise<ApiMessageOnlyResponse> =>
+  (await adminApi.delete<ApiMessageOnlyResponse>(`/admin/product-images/${imageId}`)).data

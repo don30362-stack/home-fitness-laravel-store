@@ -26,6 +26,7 @@ const adminViews = {
   ProductManagementView: '/src/views/admin/ProductManagementView.vue', AdminProductDetailView: '/src/views/admin/AdminProductDetailView.vue',
   AppPagination: '/src/components/common/AppPagination.vue',
   ProductForm: '/src/components/admin/ProductForm.vue', AdminProductFormView: '/src/views/admin/AdminProductFormView.vue',
+  ProductImageManager: '/src/components/admin/ProductImageManager.vue',
 }
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', plugins: [{
   name: 'admin-test-sfc', enforce: 'pre',
@@ -833,4 +834,159 @@ test('表單load失敗手動GET重試，不送mutation', async () => {
   api.defaults.adapter = coreAdapter(c => { throw Error('unexpected mutation') })
   await click(view, '重試'); assert.equal(find(view.root, el => el.props.id === 'core-name').value, productItem.name)
   assert.equal(mutations().length, 0); assertCoreBoundary(); view.app.unmount()
+})
+
+const imageRow = (id, primary = false, order = 0, type = 'gallery') => ({ id, image_path: `products/1/test-${id}.jpg`,
+  image_url: `http://localhost/storage/products/1/test-${id}.jpg`, image_type: type, is_primary: primary, sort_order: order })
+const imageSection = view => find(view.root, el => el.props['aria-labelledby'] === 'product-images-title')
+const imageButton = (view, label) => find(imageSection(view), el => el.type === 'button' && text(el).trim() === label)
+const imageClick = async (view, label) => { const b = imageButton(view, label); assert.ok(b, label); b.props.onClick(); await settle() }
+const selectImageFile = async (view, file = new File(['fixture bytes'], 'browser-original.png', { type: 'image/png' })) => {
+  const input = find(view.root, el => el.props.id === 'image-file'); input.files = [file]; input.props.onChange({ target: input }); await nextTick()
+}
+const submitImage = async view => { find(imageSection(view), el => el.type === 'form').props.onSubmit({ preventDefault() {} }); await settle() }
+const imageAdapter = (rows, handler) => async c => {
+  calls.push(c)
+  if (c.method !== 'get') return handler(c)
+  return response(c, c.url === '/categories' ? { data: categoryOptions } : { data: { ...productDetail, images: rows() } })
+}
+const assertImageBoundary = () => {
+  assert.ok(calls.every(c => c.url === '/categories' || /^\/admin\/products(?:\/\d+(?:\/images)?)?$/.test(c.url) || /^\/admin\/product-images\/\d+$/.test(c.url)))
+  assertMemberUntouched()
+}
+
+test('create說明建立後管理圖片，核心payload無binary；edit顯示thumbnail/metadata/primary', async () => {
+  const create = await productsView('/admin/products/new')
+  assert.ok(text(create.root).includes('請先建立商品，再於編輯頁管理圖片')); assert.equal(find(create.root, el => el.props.id === 'image-file'), undefined)
+  create.app.unmount()
+  const edit = await productsView('/admin/products/1/edit')
+  const section = imageSection(edit); assert.ok(section); assert.ok(text(section).includes('主圖／detail／排序 2'))
+  assert.equal(find(section, el => el.type === 'img').props.src, productDetail.images[0].image_url)
+  assert.equal(find(section, el => el.props.id === 'image-file').props.accept, 'image/jpeg,image/png,image/webp')
+  assert.equal(mutations().length, 0); assertImageBoundary(); edit.app.unmount()
+})
+
+test('image Service：native FormData/POST、PATCH/DELETE端點，無手動multipart boundary', async () => {
+  api.defaults.adapter = async c => { calls.push(c); return response(c, { data: imageRow(1, true), message: '完成' }) }
+  const file = new File(['bytes'], 'image.webp', { type: 'image/webp' })
+  await productService.uploadAdminProductImage(1, { image: file, image_type: 'detail', sort_order: 7, is_primary: true })
+  assert.ok(calls[0].data instanceof FormData); assert.equal(calls[0].data.get('image').name, 'image.webp')
+  assert.equal(calls[0].data.get('image_type'), 'detail'); assert.equal(calls[0].data.get('sort_order'), '7'); assert.equal(calls[0].data.get('is_primary'), '1')
+  assert.ok(!String(calls[0].headers.get('Content-Type')).includes('boundary='))
+  await productService.updateAdminProductImage(1, { sort_order: 2, image_type: 'gallery' })
+  await productService.deleteAdminProductImage(1)
+  assert.deepEqual(calls.map(c => [c.method, c.url]), [['post', '/admin/products/1/images'], ['patch', '/admin/product-images/1'], ['delete', '/admin/product-images/1']])
+  assertImageBoundary()
+})
+
+test('upload防重送/无optimistic：成功後GET权威图片集合，新图可为唯一primary', async () => {
+  let rows = [imageRow(1, true)], finish
+  api.defaults.adapter = imageAdapter(() => rows, c => new Promise(resolve => { finish = () => { rows = [imageRow(1), imageRow(2, true, 6, 'detail')]; resolve(response(c, { data: rows[1], message: '圖片上傳成功' }, 201)) } }))
+  const view = await productsView('/admin/products/1/edit'); await selectImageFile(view)
+  await inputValue(view, 'image-upload-type', 'detail'); await inputValue(view, 'image-upload-order', 6); await inputValue(view, 'image-upload-primary', '1')
+  await submitImage(view); await submitImage(view)
+  assert.equal(mutations().length, 1); assert.equal(find(imageSection(view), el => el.type === 'img').props.src, rows[0].image_url)
+  assert.ok(find(imageSection(view), el => el.type === 'fieldset').props.disabled)
+  assert.equal(mutations()[0].data.get('sort_order'), '6')
+  finish(); await settle(); assert.ok(text(imageSection(view)).includes('主圖／detail／排序 6'))
+  assert.ok(text(imageSection(view)).includes('非主圖／gallery／排序 0'))
+  assert.equal(calls.filter(c => c.url === '/admin/products/1' && c.method === 'get').length, 2)
+  assert.equal(find(view.root, el => el.props.id === 'image-file').value, '')
+  assertImageBoundary(); view.app.unmount()
+})
+
+test('metadata防重送、draft未當正式值；成功GET後更新類型/排序', async () => {
+  let rows = [imageRow(1, true)], finish
+  api.defaults.adapter = imageAdapter(() => rows, c => new Promise(resolve => { finish = () => { rows = [imageRow(1, true, 8, 'detail')]; resolve(response(c, { data: rows[0], message: '更新成功' })) } }))
+  const view = await productsView('/admin/products/1/edit')
+  await inputValue(view, 'image-type-1', 'detail'); await inputValue(view, 'image-order-1', 8)
+  await imageClick(view, '儲存圖片資料'); await imageClick(view, '儲存圖片資料')
+  assert.equal(mutations().length, 1); assert.deepEqual(JSON.parse(mutations()[0].data), { image_type: 'detail', sort_order: 8 })
+  assert.ok(text(imageSection(view)).includes('主圖／gallery／排序 0')); finish(); await settle()
+  assert.ok(text(imageSection(view)).includes('主圖／detail／排序 8')); assertImageBoundary(); view.app.unmount()
+})
+
+test('設主圖成功才呈現唯一主圖，不由client猜測其他圖狀態', async () => {
+  let rows = [imageRow(1, true), imageRow(2)], finish
+  api.defaults.adapter = imageAdapter(() => rows, c => new Promise(resolve => { finish = () => { rows = [imageRow(1), imageRow(2, true)]; resolve(response(c, { data: rows[1], message: '主圖更新成功' })) } }))
+  const view = await productsView('/admin/products/1/edit')
+  const buttons = []
+  const collect = el => { if (el.type === 'button' && text(el).trim() === '設為主圖') buttons.push(el); el.children.forEach(collect) }; collect(imageSection(view))
+  assert.equal(buttons[0].props.disabled, true); buttons[1].props.onClick(); await settle()
+  assert.deepEqual(JSON.parse(mutations()[0].data), { is_primary: true }); assert.equal(buttons[0].props.disabled, true)
+  finish(); await settle(); assert.equal(buttons[0].props.disabled, false); assert.equal(buttons[1].props.disabled, true)
+  assertImageBoundary(); view.app.unmount()
+})
+
+test('delete確認/放棄；primary刪除後GET遞補，last刪除合法empty', async () => {
+  let rows = [imageRow(1, true), imageRow(2)]
+  api.defaults.adapter = imageAdapter(() => rows, c => { rows = c.url.endsWith('/1') ? [imageRow(2, true)] : []; return response(c, { message: '圖片已刪除' }) })
+  const view = await productsView('/admin/products/1/edit')
+  await imageClick(view, '刪除圖片'); assert.ok(text(imageSection(view)).includes('確定刪除此圖片'))
+  await imageClick(view, '放棄刪圖'); assert.equal(mutations().length, 0)
+  await imageClick(view, '刪除圖片'); await imageClick(view, '確認刪圖')
+  assert.equal(mutations()[0].url, '/admin/product-images/1'); assert.ok(imageButton(view, '設為主圖').props.disabled)
+  assert.equal(find(imageSection(view), el => el.type === 'img').props.src, rows[0].image_url)
+  await imageClick(view, '刪除圖片'); await imageClick(view, '確認刪圖')
+  assert.equal(mutations().length, 2); assert.ok(text(imageSection(view)).includes('沒有圖片。'))
+  assertImageBoundary(); view.app.unmount()
+})
+
+test('upload 422 nested errors保留原圖/檔案選擇，不假成功', async () => {
+  api.defaults.adapter = imageAdapter(() => [imageRow(1, true)], c => { const e = failure(c, 422); e.response.data = { message: '圖片驗證失敗', errors: { image: ['圖片格式不符'], sort_order: ['排序必須非負'] } }; throw e })
+  const view = await productsView('/admin/products/1/edit'); await selectImageFile(view); await submitImage(view)
+  assert.ok(text(imageSection(view)).includes('圖片格式不符')); assert.ok(text(imageSection(view)).includes('排序必須非負'))
+  assert.equal(find(imageSection(view), el => el.type === 'img').props.src, imageRow(1).image_url); assert.equal(mutations().length, 1)
+  assertImageBoundary(); view.app.unmount()
+})
+
+for (const file of [new File(['bad'], 'image.gif', { type: 'image/gif' }), new File(new Uint8Array(5 * 1024 * 1024 + 1), 'large.png', { type: 'image/png' })]) {
+  test(`upload frontend UX ${file.name}阻擋，但不宣稱代替後端MIME驗證`, async () => {
+    const view = await productsView('/admin/products/1/edit'); await selectImageFile(view, file); await submitImage(view)
+    assert.ok(text(imageSection(view)).includes('單張最大 5 MiB')); assert.equal(mutations().length, 0); assertImageBoundary(); view.app.unmount()
+  })
+}
+
+for (const [status, code] of [[401], [403, 'ADMIN_ACCOUNT_DISABLED'], [403], [419], [undefined], [500]]) {
+  for (const action of ['upload', 'metadata', 'delete']) {
+    test(`image ${action} ${status ?? 'network'}/${code ?? ''}：失敗保留/coordinator/不retry/會員隔離`, async () => {
+      api.defaults.adapter = imageAdapter(() => [imageRow(1, true)], c => Promise.reject(failure(c, status, code)))
+      const view = await productsView('/admin/products/1/edit')
+      if (action === 'upload') { await selectImageFile(view); await submitImage(view) }
+      else if (action === 'metadata') await imageClick(view, '儲存圖片資料')
+      else { await imageClick(view, '刪除圖片'); await imageClick(view, '確認刪圖') }
+      await settle(); assert.equal(mutations().length, 1)
+      if (status === 401 || code) { assert.equal(auth.currentAdmin, null); assert.equal(view.router.currentRoute.value.name, 'admin-login') }
+      else { assert.equal(auth.currentAdmin.id, admin.id); assert.equal(view.router.currentRoute.value.name, 'admin-product-edit'); assert.ok(find(imageSection(view), el => el.type === 'img')); assert.ok(text(imageSection(view)).includes(status ? '後端停用原因' : '稍後再試')) }
+      assertImageBoundary(); view.app.unmount()
+    })
+  }
+}
+
+test('mutation成功但GET失敗：標示舊資料、只手動重試GET，不重送upload', async () => {
+  let rows = [imageRow(1, true)], failRefresh = false
+  api.defaults.adapter = async c => {
+    calls.push(c)
+    if (c.method === 'post') { rows = [imageRow(1, true), imageRow(2)]; failRefresh = true; return response(c, { data: rows[1], message: '圖片上傳成功' }) }
+    if (c.url === '/categories') return response(c, { data: categoryOptions })
+    if (failRefresh) throw failure(c, 500)
+    return response(c, { data: { ...productDetail, images: rows } })
+  }
+  const view = await productsView('/admin/products/1/edit'); await selectImageFile(view); await submitImage(view)
+  assert.ok(text(imageSection(view)).includes('畫面仍是先前圖片資料')); assert.equal(mutations().length, 1)
+  await submitImage(view); assert.equal(mutations().length, 1)
+  failRefresh = false; await imageClick(view, '重新載入圖片')
+  assert.ok(!text(imageSection(view)).includes('畫面仍是先前圖片資料')); assert.equal(mutations().length, 1)
+  assertImageBoundary(); view.app.unmount()
+})
+
+test('舊upload晚到不覆蓋新商品圖片，不發舊商品refresh GET', async () => {
+  let finish
+  api.defaults.adapter = async c => { calls.push(c); if (c.method === 'post') return new Promise(resolve => { finish = () => resolve(response(c, { data: imageRow(9), message: '舊上傳' })) })
+    return response(c, c.url === '/categories' ? { data: categoryOptions } : { data: { ...productDetail, id: c.url.endsWith('/2') ? 2 : 1, images: [imageRow(c.url.endsWith('/2') ? 20 : 1, true)] } }) }
+  const view = await productsView('/admin/products/1/edit'); await selectImageFile(view); await submitImage(view)
+  await view.router.push('/admin/products/2/edit'); await settle(); finish(); await settle()
+  assert.equal(find(imageSection(view), el => el.type === 'img').props.src, imageRow(20).image_url)
+  assert.ok(!text(view.root).includes('舊上傳')); assert.equal(calls.filter(c => c.url === '/admin/products/1' && c.method === 'get').length, 1)
+  assertImageBoundary(); view.app.unmount()
 })

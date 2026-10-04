@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AddressController;
 use App\Http\Controllers\Api\AdminAuthController;
 use App\Http\Controllers\Api\AdminProductController;
+use App\Http\Controllers\Api\AdminProductImageController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CartController;
 use App\Http\Controllers\Api\CheckoutController;
@@ -55,6 +56,9 @@ Route::prefix('admin')->group(function () {
             Route::patch('/products/{id}', [AdminProductController::class, 'update'])->whereNumber('id');
             Route::patch('/products/{id}/status', [AdminProductController::class, 'updateStatus'])->whereNumber('id');
             Route::delete('/products/{id}', [AdminProductController::class, 'destroy'])->whereNumber('id');
+            Route::post('/products/{productId}/images', [AdminProductImageController::class, 'store'])->whereNumber('productId');
+            Route::patch('/product-images/{imageId}', [AdminProductImageController::class, 'update'])->whereNumber('imageId');
+            Route::delete('/product-images/{imageId}', [AdminProductImageController::class, 'destroy'])->whereNumber('imageId');
         });
     });
 });
