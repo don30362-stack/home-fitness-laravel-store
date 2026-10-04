@@ -25,6 +25,7 @@ const adminViews = {
   AdminPlaceholderView: '/src/views/admin/AdminPlaceholderView.vue', AdminNotFoundView: '/src/views/admin/AdminNotFoundView.vue',
   ProductManagementView: '/src/views/admin/ProductManagementView.vue', AdminProductDetailView: '/src/views/admin/AdminProductDetailView.vue',
   AppPagination: '/src/components/common/AppPagination.vue',
+  ProductForm: '/src/components/admin/ProductForm.vue', AdminProductFormView: '/src/views/admin/AdminProductFormView.vue',
 }
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', plugins: [{
   name: 'admin-test-sfc', enforce: 'pre',
@@ -52,6 +53,7 @@ const memberState = await server.ssrLoadModule('/src/services/sessionState.ts')
 const { default: memberApi } = await server.ssrLoadModule('/src/services/api.ts')
 const { default: Login } = await server.ssrLoadModule('virtual:admin-login')
 const routes = await server.ssrLoadModule('/src/router/adminRoutes.ts')
+const productService = await server.ssrLoadModule('/src/services/adminProductService.ts')
 const originalError = console.error
 console.error = () => {}
 after(async () => { console.error = originalError; await server.close() })
@@ -269,9 +271,14 @@ const renderer = createRenderer({
   createElement: (type) => node(type), createText: (text) => node('text', text), createComment: () => node('comment'),
   setText: (el, text) => { el.text = text }, setElementText: (el, text) => { el.text = text; el.children = [] },
   patchProp: (el, key, _old, value) => { el.props[key] = value; if (key === 'value') el.value = value },
-  insert(el, parent, anchor = null) { el.parent = parent; const index = anchor ? parent.children.indexOf(anchor) : -1; if (index < 0) parent.children.push(el); else parent.children.splice(index, 0, el) },
-  remove(el) { if (el.parent) el.parent.children.splice(el.parent.children.indexOf(el), 1) },
-  parentNode: (el) => el.parent, nextSibling: () => null,
+  insert(el, parent, anchor = null) {
+    if (el.parent) el.parent.children.splice(el.parent.children.indexOf(el), 1)
+    el.parent = parent; const index = anchor ? parent.children.indexOf(anchor) : -1
+    if (index < 0) parent.children.push(el); else parent.children.splice(index, 0, el)
+  },
+  remove(el) { if (el.parent) { el.parent.children.splice(el.parent.children.indexOf(el), 1); el.parent = null } },
+  parentNode: (el) => el.parent,
+  nextSibling: (el) => el.parent?.children[el.parent.children.indexOf(el) + 1] ?? null,
 })
 const text = (el) => el.text + el.children.map(text).join('')
 const find = (el, predicate) => predicate(el) ? el : el.children.map((child) => find(child, predicate)).find(Boolean)
@@ -333,7 +340,7 @@ const mountRoute = async (url, instance = memoryRouter()) => {
   return { ...instance, root, app }
 }
 
-for (const path of ['/admin/dashboard', '/admin/orders', '/admin/does-not-exist', '/admin/products', '/admin/products/1']) {
+for (const path of ['/admin/dashboard', '/admin/orders', '/admin/does-not-exist', '/admin/products', '/admin/products/1', '/admin/products/new', '/admin/products/1/edit']) {
   test(`guest/member-only ${path} 經真 guard 導登入；會員身分不等於 Admin`, async () => {
     auth.currentAdmin = null
     api.defaults.adapter = (config) => { calls.push(config); return Promise.reject(failure(config, 401)) }
@@ -508,7 +515,7 @@ test('商品頁替換 placeholder，列表唯讀、detail入口、分類只用�
   const view = await productsView()
   const main = find(view.root, el => el.type === 'main')
   assert.ok(text(main).includes(productItem.name)); assert.ok(text(main).includes('依購買規格管理'))
-  assert.ok(!text(main).includes('尚未實作')); assert.ok(!text(main).includes('新增商品'))
+  assert.ok(!text(main).includes('尚未實作')); assert.ok(text(main).includes('新增商品'))
   const link = find(main, el => el.type === 'a' && el.props.href === '/admin/products/1')
   assert.ok(link); assertReadOnlyProductCalls(); view.app.unmount()
 })
@@ -574,7 +581,7 @@ test('分類選項失敗可獨立重試，不請求Admin categories或清會員'
     ? Promise.reject(failure(config, 500)) : Promise.resolve(response(config, productPage())) }
   const view = await productsView(); assert.ok(text(view.root).includes('分類選項載入失敗'))
   api.defaults.adapter = async config => { calls.push(config); return response(config, { data: categoryOptions }) }
-  await find(view.root, el => el.type === 'button' && text(el) === '重試分類').props.onClick(); await settle()
+  await find(view.root, el => el.type === 'button' && text(el).trim() === '重試分類').props.onClick(); await settle()
   assert.ok(!text(view.root).includes('分類選項載入失敗')); assertReadOnlyProductCalls(); view.app.unmount()
 })
 test('商品查詢舊成功與舊失敗均不可覆蓋新条件結果', async () => {
@@ -618,4 +625,212 @@ test('快速切換詳細id，晚到舊商品不可覆蓋目前商品', async () 
   pending[0].resolve(response(pending[0].config, { data: productDetail })); await settle()
   assert.ok(text(view.root).includes('第二商品')); assert.ok(!text(view.root).includes(productItem.name))
   assertMemberUntouched(); view.app.unmount()
+})
+
+// Stage19 Step2：真實SFC + Service + Axios adapter，並非瀏覽器/DB驗收。
+const inputValue = async (view, id, value) => {
+  const input = find(view.root, el => el.props.id === id)
+  assert.ok(input, id); input.value = String(value)
+  if (input.type === 'select') {
+    for (const option of input.options) option.selected = String(option.value) === String(value)
+    input.listeners.change({ target: input })
+  } else input.listeners.input({ target: input })
+  await nextTick()
+}
+const button = (view, label) => find(view.root, el => el.type === 'button' && text(el).trim() === label)
+const click = async (view, label) => { assert.ok(button(view, label), label); button(view, label).props.onClick(); await settle() }
+const submitCore = async (view) => { find(view.root, el => el.type === 'form').props.onSubmit({ preventDefault() {} }); await settle() }
+const mutations = () => calls.filter(c => c.method !== 'get')
+const coreAdapter = (handler) => async config => {
+  calls.push(config)
+  if (config.method !== 'get') return handler(config)
+  if (config.url === '/categories') return response(config, { data: categoryOptions })
+  return response(config, config.url === '/admin/products' ? productPage() : { data: productDetail })
+}
+const assertCoreBoundary = () => {
+  assert.ok(calls.every(c => c.url === '/categories' || /^\/admin\/products(?:\/\d+(?:\/status)?)?$/.test(c.url)))
+  assertMemberUntouched()
+}
+
+test('Admin mutation Service 正確四種endpoint/payload/envelope，沒有重送或會員transport', async () => {
+  api.defaults.adapter = coreAdapter(c => response(c, c.method === 'delete' ? { message: '已刪' } : { data: productDetail, message: '已存' }))
+  const create = { category_id: 2, name: '新增', price: 100, stock: 0, status: 'active', low_stock_threshold: 5 }
+  assert.equal((await productService.createAdminProduct(create)).data.id, 1)
+  await productService.updateAdminProduct('1', { name: '改名', specifications: [] })
+  await productService.updateAdminProductStatus('1', { status: 'disabled' })
+  assert.equal((await productService.deleteAdminProduct('1')).message, '已刪')
+  assert.deepEqual(mutations().map(c => [c.method, c.url]), [['post', '/admin/products'], ['patch', '/admin/products/1'], ['patch', '/admin/products/1/status'], ['delete', '/admin/products/1']])
+  assert.deepEqual(JSON.parse(calls[0].data), create); assertCoreBoundary()
+})
+
+test('create plain route：系統編號不可輸入、初始庫存/specs、submitting不重送、成功才導航', async () => {
+  let finish
+  api.defaults.adapter = coreAdapter(c => new Promise(resolve => { finish = () => resolve(response(c, { data: { ...productDetail, id: 10 }, message: '已建立' }, 201)) }))
+  const view = await productsView('/admin/products/new')
+  assert.equal(view.router.currentRoute.value.name, 'admin-product-create')
+  assert.ok(text(view.root).includes('系統建立後自動產生')); assert.equal(find(view.root, el => el.props.id === 'core-code'), undefined)
+  for (const [id, value] of [['core-name', '新增商品'], ['core-category', '2'], ['core-price', '99.50'], ['core-stock', '6']]) await inputValue(view, id, value)
+  await click(view, '新增固定規格'); await inputValue(view, 'spec-name-0', '材質'); await inputValue(view, 'spec-value-0', '鋼')
+  await submitCore(view); await submitCore(view)
+  assert.equal(mutations().length, 1); assert.ok(find(view.root, el => el.type === 'fieldset').props.disabled)
+  assert.equal(view.router.currentRoute.value.name, 'admin-product-create')
+  const data = JSON.parse(mutations()[0].data)
+  assert.equal(data.stock, 6); assert.equal(data.price, 99.5); assert.equal(data.product_code, undefined); assert.equal(data.variants, undefined)
+  assert.deepEqual(data.specifications, [{ spec_name: '材質', spec_value: '鋼', sort_order: 0 }])
+  finish(); await settle(); assert.equal(view.router.currentRoute.value.fullPath, '/admin/products/10')
+  assertCoreBoundary(); view.app.unmount()
+})
+
+test('create variant：單軸欄位、新variant初始庫存、product stock null、spec add/remove', async () => {
+  api.defaults.adapter = coreAdapter(c => response(c, { data: productDetail, message: '成功' }, 201))
+  const view = await productsView('/admin/products/new')
+  await inputValue(view, 'core-mode', 'variant'); await click(view, '新增購買規格')
+  await inputValue(view, 'variant-name-0', '顏色'); await inputValue(view, 'variant-value-0', '黑'); await inputValue(view, 'variant-stock-0', 3)
+  assert.equal(find(view.root, el => el.props.id === 'variant-stock-0').props.readonly, false)
+  await click(view, '新增固定規格'); await click(view, '移除固定規格')
+  await submitCore(view)
+  const data = JSON.parse(mutations()[0].data)
+  assert.equal(data.stock, null); assert.deepEqual(data.specifications, [])
+  assert.deepEqual(data.variants, [{ option_name: '顏色', option_value: '黑', stock: 3, status: 'active' }])
+  assertCoreBoundary(); view.app.unmount()
+})
+
+test('edit：舊編號/mode/既有stock唯讀，保留id、不送existing stock，新variant可初始庫存', async () => {
+  let finish
+  api.defaults.adapter = coreAdapter(c => new Promise(resolve => { finish = () => resolve(response(c, { data: productDetail, message: '已存' })) }))
+  const view = await productsView('/admin/products/1/edit')
+  assert.equal(find(view.root, el => el.props.id === 'core-code').props.readonly, '')
+  assert.equal(find(view.root, el => el.props.id === 'core-code').value, 'PRD-EXISTING')
+  assert.equal(find(view.root, el => el.props.id === 'core-mode'), undefined)
+  assert.equal(find(view.root, el => el.props.id === 'variant-stock-0').props.readonly, true)
+  assert.ok(text(view.root).includes('庫存調整請至庫存管理'))
+  await click(view, '新增購買規格'); await inputValue(view, 'variant-value-1', '白色'); await inputValue(view, 'variant-stock-1', '7')
+  await submitCore(view); await submitCore(view); assert.equal(mutations().length, 1)
+  const data = JSON.parse(mutations()[0].data)
+  for (const field of ['product_code', 'stock', 'status', 'images']) assert.equal(data[field], undefined)
+  assert.equal(data.variants[0].id, 1); assert.equal(data.variants[0].stock, undefined)
+  assert.equal(data.variants[1].id, undefined); assert.equal(data.variants[1].stock, 7)
+  assert.equal(view.router.currentRoute.value.name, 'admin-product-edit'); finish(); await settle()
+  assert.equal(view.router.currentRoute.value.name, 'admin-product-detail'); assertCoreBoundary(); view.app.unmount()
+})
+
+test('plain edit：商品stock唯讀、不送庫存；inactive目前分類不在公開選項仍可保留', async () => {
+  api.defaults.adapter = async c => { calls.push(c); return response(c, c.url === '/categories' ? { data: [] }
+    : { data: { ...productDetail, stock: 12, has_variants: false, variants: [] } }) }
+  const view = await productsView('/admin/products/1/edit')
+  assert.equal(find(view.root, el => el.props.id === 'core-stock').props.readonly, true)
+  assert.ok(text(view.root).includes('目前分類，可保留'))
+  api.defaults.adapter = coreAdapter(c => response(c, { data: productDetail, message: '成功' }))
+  await submitCore(view)
+  const data = JSON.parse(mutations()[0].data); assert.equal(data.stock, undefined); assert.equal(data.variants, undefined); assert.equal(data.category_id, 2)
+  assertCoreBoundary(); view.app.unmount()
+})
+
+test('referenced variant移除422：保留draft與待刪項、後端nested原因、可復原，無假成功', async () => {
+  api.defaults.adapter = coreAdapter(c => { const e = failure(c, 422); e.response.data = { message: '歷史規格不可刪除，請改為inactive', errors: { 'variants.0.option_value': ['購物車規格不可改名'] } }; throw e })
+  const view = await productsView('/admin/products/1/edit')
+  await inputValue(view, 'core-name', '保留輸入'); await click(view, '移除購買規格'); await submitCore(view)
+  assert.equal(view.router.currentRoute.value.name, 'admin-product-edit'); assert.ok(text(view.root).includes('購物車規格不可改名'))
+  assert.equal(find(view.root, el => el.props.id === 'core-name').value, '保留輸入')
+  assert.ok(text(view.root).includes('待刪除：顏色／黑色')); await click(view, '保留此規格')
+  assert.equal(find(view.root, el => el.props.id === 'variant-value-0').value, '黑色')
+  assert.equal(mutations().length, 1); assertCoreBoundary(); view.app.unmount()
+})
+
+for (const status of ['active', 'inactive', 'disabled']) {
+  test(`status ${status}：使用後端Resource、提交前不optimistic、重送防護`, async () => {
+    let finish
+    const original = status === 'inactive' ? 'active' : 'inactive'
+    api.defaults.adapter = async c => { calls.push(c); if (c.method === 'get') return response(c, { data: { ...productDetail, status: original } })
+      return new Promise(resolve => { finish = () => resolve(response(c, { data: { ...productDetail, status }, message: '狀態已更新' })) }) }
+    const view = await productsView('/admin/products/1')
+    const label = { active: '設為上架', inactive: '設為下架', disabled: '設為停用' }[status]
+    await click(view, label); await click(view, label)
+    assert.equal(mutations().length, 1); assert.equal(find(view.root, el => el.type === 'dd' && text(el) === ({ active: '上架', inactive: '下架' }[original])).text, ({ active: '上架', inactive: '下架' }[original]))
+    assert.deepEqual(JSON.parse(mutations()[0].data), { status }); finish(); await settle()
+    assert.ok(button(view, label).props.disabled); assert.ok(text(view.root).includes('狀態已更新'))
+    assertCoreBoundary(); view.app.unmount()
+  })
+}
+
+test('DELETE：明確cart警告，放棄不送，確認成功才回列表', async () => {
+  let finish
+  api.defaults.adapter = coreAdapter(c => new Promise(resolve => { finish = () => resolve(response(c, { message: '已刪' })) }))
+  const view = await productsView('/admin/products/1?status=inactive&page=2')
+  await click(view, '刪除商品'); assert.ok(text(view.root).includes('會員購物車項目'))
+  await click(view, '放棄'); assert.equal(mutations().length, 0)
+  await click(view, '刪除商品'); await click(view, '確認刪除'); await click(view, '確認刪除')
+  assert.equal(mutations().length, 1); assert.equal(view.router.currentRoute.value.name, 'admin-product-detail')
+  finish(); await settle(); assert.equal(view.router.currentRoute.value.fullPath, '/admin/products?status=inactive&page=2')
+  assertCoreBoundary(); view.app.unmount()
+})
+
+test('歷史order DELETE 422：顯示原因、保留商品/URL，不自動下架', async () => {
+  api.defaults.adapter = coreAdapter(c => { const e = failure(c, 422); e.response.data.message = '商品已有歷史訂單，不能實體刪除'; throw e })
+  const view = await productsView('/admin/products/1')
+  await click(view, '刪除商品'); await click(view, '確認刪除')
+  assert.equal(view.router.currentRoute.value.name, 'admin-product-detail'); assert.ok(text(view.root).includes('商品已有歷史訂單'))
+  assert.ok(text(view.root).includes(productItem.name)); assert.equal(mutations().length, 1); assertCoreBoundary(); view.app.unmount()
+})
+
+for (const [status, code] of [[401], [403, 'ADMIN_ACCOUNT_DISABLED'], [403], [419], [undefined], [500]]) {
+  for (const action of ['form', 'status', 'delete']) {
+    test(`${action} mutation ${status ?? 'network'}/${code ?? ''}：coordinator邊界、保留原值、不retry/不清member`, async () => {
+      api.defaults.adapter = coreAdapter(c => Promise.reject(failure(c, status, code)))
+      const view = await productsView(action === 'form' ? '/admin/products/1/edit' : '/admin/products/1')
+      if (action === 'form') await submitCore(view)
+      else if (action === 'status') await click(view, '設為停用')
+      else { await click(view, '刪除商品'); await click(view, '確認刪除') }
+      await settle(); assert.equal(mutations().length, 1)
+      if (status === 401 || code) { assert.equal(auth.currentAdmin, null); assert.equal(view.router.currentRoute.value.name, 'admin-login') }
+      else {
+        assert.equal(auth.currentAdmin.id, admin.id); assert.notEqual(view.router.currentRoute.value.name, 'admin-login')
+        assert.ok(text(view.root).includes(status ? '後端停用原因' : '稍後再試'))
+        if (action === 'status') assert.equal(button(view, '設為下架').props.disabled, true)
+        if (action === 'form') assert.equal(find(view.root, el => el.props.id === 'core-name').value, productItem.name)
+      }
+      assertCoreBoundary(); view.app.unmount()
+    })
+  }
+}
+
+test('status舊回應晚到，不覆蓋另一張詳細商品', async () => {
+  let finish
+  api.defaults.adapter = async c => { calls.push(c); return c.method !== 'get'
+    ? new Promise(resolve => { finish = () => resolve(response(c, { data: { ...productDetail, status: 'disabled' }, message: '舊結果' })) })
+    : response(c, { data: c.url.endsWith('/2') ? { ...productDetail, id: 2, name: '第二商品' } : productDetail }) }
+  const view = await productsView('/admin/products/1'); await click(view, '設為停用')
+  await view.router.push('/admin/products/2'); await settle(); finish(); await settle()
+  assert.ok(text(view.root).includes('第二商品')); assert.ok(!text(view.root).includes('舊結果'))
+  assertCoreBoundary(); view.app.unmount()
+})
+
+test('edit舊save回應晚到，不導航或覆蓋另一張form', async () => {
+  let finish
+  api.defaults.adapter = async c => { calls.push(c); if (c.method !== 'get') return new Promise(resolve => { finish = () => resolve(response(c, { data: productDetail, message: '舊儲存' })) })
+    return response(c, c.url === '/categories' ? { data: categoryOptions } : { data: { ...productDetail, id: c.url.endsWith('/2') ? 2 : 1 } }) }
+  const view = await productsView('/admin/products/1/edit'); await submitCore(view)
+  await view.router.push('/admin/products/2/edit'); await settle(); finish(); await settle()
+  assert.equal(view.router.currentRoute.value.fullPath, '/admin/products/2/edit'); assertCoreBoundary(); view.app.unmount()
+})
+
+test('create nested422：保留新增欄位、顯示variant原因、不導航或重送', async () => {
+  api.defaults.adapter = coreAdapter(c => { const e = failure(c, 422); e.response.data = { message: '規格驗證失敗', errors: { 'variants.0.option_value': ['選項值不可重複'] } }; throw e })
+  const view = await productsView('/admin/products/new')
+  await inputValue(view, 'core-name', '草稿商品'); await inputValue(view, 'core-mode', 'variant'); await click(view, '新增購買規格')
+  await inputValue(view, 'variant-name-0', '顏色'); await inputValue(view, 'variant-value-0', '黑')
+  await submitCore(view); assert.ok(text(view.root).includes('選項值不可重複'))
+  assert.equal(find(view.root, el => el.props.id === 'core-name').value, '草稿商品')
+  assert.equal(find(view.root, el => el.props.id === 'variant-value-0').value, '黑')
+  assert.equal(view.router.currentRoute.value.name, 'admin-product-create'); assert.equal(mutations().length, 1)
+  assertCoreBoundary(); view.app.unmount()
+})
+
+test('表單load失敗手動GET重試，不送mutation', async () => {
+  api.defaults.adapter = c => { calls.push(c); return Promise.reject(failure(c, 500)) }
+  const view = await productsView('/admin/products/1/edit')
+  assert.ok(text(view.root).includes('後端停用原因')); assert.equal(find(view.root, el => el.type === 'form'), undefined)
+  api.defaults.adapter = coreAdapter(c => { throw Error('unexpected mutation') })
+  await click(view, '重試'); assert.equal(find(view.root, el => el.props.id === 'core-name').value, productItem.name)
+  assert.equal(mutations().length, 0); assertCoreBoundary(); view.app.unmount()
 })

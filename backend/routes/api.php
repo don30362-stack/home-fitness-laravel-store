@@ -51,6 +51,10 @@ Route::prefix('admin')->group(function () {
         Route::middleware('admin.active')->group(function () {
             Route::get('/products', [AdminProductController::class, 'index']);
             Route::get('/products/{id}', [AdminProductController::class, 'show'])->whereNumber('id');
+            Route::post('/products', [AdminProductController::class, 'store']);
+            Route::patch('/products/{id}', [AdminProductController::class, 'update'])->whereNumber('id');
+            Route::patch('/products/{id}/status', [AdminProductController::class, 'updateStatus'])->whereNumber('id');
+            Route::delete('/products/{id}', [AdminProductController::class, 'destroy'])->whereNumber('id');
         });
     });
 });

@@ -1,12 +1,22 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
-import { getAdminProduct } from '@/services/adminProductService'
+import {
+  getAdminProduct,
+  updateAdminProductStatus,
+  deleteAdminProduct,
+} from '@/services/adminProductService'
+import type { ProductStatus } from '@/types/adminProduct'
 import type { AdminProductDetail } from '@/types/adminProduct'
 import type { ApiErrorResponse } from '@/types/api'
 
 const route = useRoute()
+const router = useRouter()
+const submitting = ref(false),
+  mutationError = ref(''),
+  mutationMessage = ref(''),
+  confirmDelete = ref(false)
 const product = ref<AdminProductDetail | null>(null)
 const isLoading = ref(false)
 const errorMessage = ref('')
@@ -14,6 +24,10 @@ let requestId = 0
 const labels: Record<string, string> = { active: '上架', inactive: '下架', disabled: '停用' }
 const load = async () => {
   const current = ++requestId
+  submitting.value = false
+  mutationError.value = ''
+  mutationMessage.value = ''
+  confirmDelete.value = false
   product.value = null
   errorMessage.value = ''
   isLoading.value = true
@@ -30,6 +44,33 @@ const load = async () => {
           : '商品詳細載入失敗，請重試。'
   } finally {
     if (current === requestId) isLoading.value = false
+  }
+}
+const mutate = async (status?: ProductStatus) => {
+  if (submitting.value || !product.value || (status === undefined && !confirmDelete.value)) return
+  const current = requestId,
+    id = String(product.value.id)
+  submitting.value = true
+  mutationError.value = ''
+  mutationMessage.value = ''
+  try {
+    if (status !== undefined) {
+      const result = await updateAdminProductStatus(id, { status })
+      if (current === requestId) {
+        product.value = result.data
+        mutationMessage.value = result.message
+      }
+    } else {
+      await deleteAdminProduct(id)
+      if (current === requestId) await router.push({ name: 'admin-products', query: route.query })
+    }
+  } catch (error) {
+    if (current === requestId)
+      mutationError.value = axios.isAxiosError<ApiErrorResponse>(error)
+        ? error.response?.data.message || '商品操作失敗，請稍後再試。'
+        : '商品操作失敗，請稍後再試。'
+  } finally {
+    if (current === requestId) submitting.value = false
   }
 }
 const formatDate = (value: string | null) => (value ? new Date(value).toLocaleString('zh-TW') : '—')
@@ -50,6 +91,50 @@ onBeforeUnmount(() => {
     </div>
     <template v-else-if="product">
       <h2 class="h4">{{ product.name }}</h2>
+      <RouterLink
+        class="btn btn-outline-primary mb-3"
+        :to="{ name: 'admin-product-edit', params: { id: product.id }, query: route.query }"
+        >編輯商品</RouterLink
+      >
+      <p v-if="mutationError" class="alert alert-danger" role="alert">{{ mutationError }}</p>
+      <p v-if="mutationMessage" class="alert alert-success" role="status">{{ mutationMessage }}</p>
+      <div class="d-flex flex-wrap gap-2 mb-3">
+        <button
+          v-for="status in ['active', 'inactive', 'disabled'] as const"
+          :key="status"
+          type="button"
+          class="btn btn-outline-secondary"
+          :disabled="submitting || product.status === status"
+          @click="mutate(status)"
+        >
+          設為{{ labels[status] }}
+        </button>
+        <button
+          type="button"
+          class="btn btn-outline-danger"
+          :disabled="submitting"
+          @click="confirmDelete = true"
+        >
+          刪除商品
+        </button>
+      </div>
+      <p v-if="submitting" role="status">處理中…</p>
+      <div v-if="confirmDelete" class="alert alert-warning">
+        <p>
+          確定實體刪除此商品？若沒有歷史訂單但存在會員購物車項目，刪除後這些購物車項目會一併移除。有歷史訂單的商品無法刪除，請改為下架或停用。
+        </p>
+        <button type="button" class="btn btn-danger me-2" :disabled="submitting" @click="mutate()">
+          確認刪除
+        </button>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          :disabled="submitting"
+          @click="confirmDelete = false"
+        >
+          放棄
+        </button>
+      </div>
       <dl class="row">
         <dt class="col-sm-3">商品編號</dt>
         <dd class="col-sm-9">{{ product.product_code }}</dd>

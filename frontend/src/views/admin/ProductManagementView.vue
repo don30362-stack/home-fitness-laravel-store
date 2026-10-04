@@ -97,6 +97,7 @@ onBeforeUnmount(() => {
 <template>
   <section aria-labelledby="admin-products-title">
     <h1 id="admin-products-title" class="h3">商品管理</h1>
+    <RouterLink class="btn btn-primary mb-3" :to="{ name: 'admin-product-create', query: route.query }">新增商品</RouterLink>
     <form class="row g-3 mb-4" @submit.prevent="applyFilters">
       <div class="col-12 col-lg-5">
         <label for="product-search" class="form-label">名稱或商品編號</label>
