@@ -27,6 +27,7 @@ const adminViews = {
   AppPagination: '/src/components/common/AppPagination.vue',
   ProductForm: '/src/components/admin/ProductForm.vue', AdminProductFormView: '/src/views/admin/AdminProductFormView.vue',
   ProductImageManager: '/src/components/admin/ProductImageManager.vue',
+  InventoryManagementView: '/src/views/admin/InventoryManagementView.vue',
 }
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', plugins: [{
   name: 'admin-test-sfc', enforce: 'pre',
@@ -55,6 +56,7 @@ const { default: memberApi } = await server.ssrLoadModule('/src/services/api.ts'
 const { default: Login } = await server.ssrLoadModule('virtual:admin-login')
 const routes = await server.ssrLoadModule('/src/router/adminRoutes.ts')
 const productService = await server.ssrLoadModule('/src/services/adminProductService.ts')
+const inventoryService = await server.ssrLoadModule('/src/services/adminInventoryService.ts')
 const originalError = console.error
 console.error = () => {}
 after(async () => { console.error = originalError; await server.close() })
@@ -99,6 +101,7 @@ beforeEach(() => {
     calls.push(config)
     if (config.url === '/categories') return response(config, { data: categoryOptions })
     if (config.url === '/admin/products') return response(config, productPage())
+    if (config.url === '/admin/inventory') return response(config, productPage([]))
     if (config.url.startsWith('/admin/products/')) return response(config, { data: productDetail })
     return response(config, config.url.endsWith('/csrf-cookie') ? {} : { data: admin, message: '登入成功' })
   }
@@ -341,7 +344,7 @@ const mountRoute = async (url, instance = memoryRouter()) => {
   return { ...instance, root, app }
 }
 
-for (const path of ['/admin/dashboard', '/admin/orders', '/admin/does-not-exist', '/admin/products', '/admin/products/1', '/admin/products/new', '/admin/products/1/edit']) {
+for (const path of ['/admin/dashboard', '/admin/orders', '/admin/does-not-exist', '/admin/products', '/admin/products/1', '/admin/products/new', '/admin/products/1/edit', '/admin/inventory']) {
   test(`guest/member-only ${path} 經真 guard 導登入；會員身分不等於 Admin`, async () => {
     auth.currentAdmin = null
     api.defaults.adapter = (config) => { calls.push(config); return Promise.reject(failure(config, 401)) }
@@ -365,11 +368,11 @@ test('Admin-only 八模組保持階段對照，只有 products 已有唯讀 API'
     await view.router.push('/admin/' + item.path); await settle()
     const main = find(view.root, (el) => el.type === 'main')
     assert.ok(text(main).includes(item.title))
-    if (item.path === 'products') assert.ok(!text(main).includes('尚未實作'))
+    if (['products', 'inventory'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
     else { assert.ok(text(main).includes('尚未實作')); assert.ok(text(main).includes('Stage ' + item.stage)) }
   }
   assert.deepEqual(routes.adminModules.map((item) => item.stage), [24, 19, 20, 19, 21, 21, 22, 23])
-  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/products', '/categories']); assert.equal(member.currentUser, null)
+  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/inventory', '/admin/products', '/categories', '/categories']); assert.equal(member.currentUser, null)
   const frontLink = find(view.root, (el) => el.type === 'a' && el.props.href === '/')
   assert.ok(frontLink); assert.equal(frontLink.props.onClick, undefined)
   const menu = find(view.root, (el) => el.type === 'button' && text(el) === '選單')
@@ -989,4 +992,75 @@ test('舊upload晚到不覆蓋新商品圖片，不發舊商品refresh GET', asy
   assert.equal(find(imageSection(view), el => el.type === 'img').props.src, imageRow(20).image_url)
   assert.ok(!text(view.root).includes('舊上傳')); assert.equal(calls.filter(c => c.url === '/admin/products/1' && c.method === 'get').length, 1)
   assertImageBoundary(); view.app.unmount()
+})
+
+// Stage19 Step4 inventory uses the existing memory renderer, not browser acceptance.
+const inventoryItem = { stock_owner_type:'product',stock_owner_id:1,product_id:1,product_code:'PRD-INVENTORY',product_name:'庫存啞鈴',product_status:'inactive',category:{id:2,name:'啞鈴'},variant:null,stock:3,low_stock_threshold:5,inventory_status:'low_stock' }
+const inventoryVariant = {...inventoryItem,stock_owner_type:'variant',stock_owner_id:2,product_id:2,variant:{id:2,option_name:'顏色',option_value:'黑色',status:'inactive'},stock:0,inventory_status:'out_of_stock'}
+const inventoryAdapter = (data=[inventoryItem,inventoryVariant]) => async config => { calls.push(config); if(config.url==='/categories')return response(config,{data:categoryOptions}); assert.equal(config.url,'/admin/inventory');assert.equal(config.method,'get');return response(config,productPage(data,Number(config.params?.page||1),2)) }
+const inventoryView = async(url='/admin/inventory')=>{auth.isAdminInitialized=true;return mountRoute(url)}
+const inventoryPanel = view=>find(view.root,el=>el.props['aria-label']==='庫存調整')
+const submitAdjustment = async view=>{find(inventoryPanel(view),el=>el.type==='form').props.onSubmit({preventDefault(){}});await settle()}
+const assertInventoryCalls=()=>{assert.ok(calls.every(c=>c.url==='/categories'||/^\/admin\/inventory(?:\/(?:variants\/)?\d+)?$/.test(c.url)));assert.ok(calls.every(c=>['get','patch'].includes(c.method)));assertMemberUntouched()}
+
+test('Inventory service adminApi：GET與兩種delta PATCH契約',async()=>{
+ api.defaults.adapter=async config=>{calls.push(config);return response(config,{data:inventoryItem,message:'庫存調整成功'})}
+ await inventoryService.getAdminInventory({search:'PRD',inventory_status:'low_stock',page:'2'});await inventoryService.adjustProductInventory(1,{adjustment:5});await inventoryService.adjustVariantInventory(2,{adjustment:-3})
+ assert.deepEqual(calls.map(c=>[c.method,c.url]),[['get','/admin/inventory'],['patch','/admin/inventory/1'],['patch','/admin/inventory/variants/2']]);assert.deepEqual(JSON.parse(calls[1].data),{adjustment:5});assert.deepEqual(JSON.parse(calls[2].data),{adjustment:-3});assertInventoryCalls()
+})
+test('Inventory真頁面：plain/variant、inactive/disabled、販售與庫存狀態分開',async()=>{
+ api.defaults.adapter=inventoryAdapter([inventoryItem,inventoryVariant,{...inventoryItem,stock_owner_id:3,product_status:'disabled',stock:20,inventory_status:'normal'}]);const view=await inventoryView();const main=find(view.root,el=>el.type==='main')
+ for(const value of ['庫存管理','庫存啞鈴','顏色：黑色','低庫存','缺貨','正常','管理性停用','停用販售'])assert.ok(text(main).includes(value),value)
+ const adjustmentButtons=[];const collectButtons=el=>{if(el.type==='button'&&text(el).trim()==='調整庫存')adjustmentButtons.push(el);el.children.forEach(collectButtons)};collectButtons(main)
+ assert.ok(!text(main).includes('尚未實作'));assert.equal(adjustmentButtons.length,3);assertInventoryCalls();view.app.unmount()
+})
+test('Inventory initial loading與empty',async()=>{
+ let finish;api.defaults.adapter=config=>{calls.push(config);return config.url==='/categories'?Promise.resolve(response(config,{data:categoryOptions})):new Promise(resolve=>{finish=()=>resolve(response(config,productPage([],1,1)))})}
+ const view=await inventoryView();assert.ok(text(view.root).includes('庫存載入中'));finish();await settle();assert.ok(text(view.root).includes('沒有符合條件的庫存'));assertInventoryCalls();view.app.unmount()
+})
+test('Inventory URL reload/search/category/status/page/back-forward',async()=>{
+ api.defaults.adapter=inventoryAdapter();const view=await inventoryView('/admin/inventory?search=old&category_id=2&inventory_status=low_stock&page=2')
+ assert.deepEqual(calls.find(c=>c.url==='/admin/inventory').params,{search:'old',category_id:'2',inventory_status:'low_stock',page:'2'})
+ await click(view,'上一頁');assert.equal(view.router.currentRoute.value.query.inventory_status,'low_stock');assert.equal(view.router.currentRoute.value.query.page,'1')
+ await submitProductFilters(view,{'inventory-search':'PRD-NEW','inventory-category':'2','inventory-status':'normal'});assert.deepEqual({...view.router.currentRoute.value.query},{search:'PRD-NEW',category_id:'2',inventory_status:'normal',page:'1'})
+ view.router.back();await settle();assert.equal(find(view.root,el=>el.props.id==='inventory-search').value,'old');view.router.forward();await settle();assert.equal(find(view.root,el=>el.props.id==='inventory-status').value,'normal');view.app.unmount()
+ const reload=await inventoryView('/admin/inventory?search=PRD-NEW&category_id=2&inventory_status=normal&page=1');assert.equal(find(reload.root,el=>el.props.id==='inventory-search').value,'PRD-NEW');assertInventoryCalls();reload.app.unmount()
+})
+test('Inventory舊GET成功/錯誤不覆蓋新結果',async()=>{
+ const pending=[];api.defaults.adapter=config=>{calls.push(config);return config.url==='/categories'?Promise.resolve(response(config,{data:categoryOptions})):new Promise((resolve,reject)=>pending.push({config,resolve,reject}))}
+ const view=await inventoryView('/admin/inventory?search=old');await view.router.push('/admin/inventory?search=middle');await settle();await view.router.push('/admin/inventory?search=new');await settle()
+ pending[2].resolve(response(pending[2].config,productPage([{...inventoryItem,product_name:'最新庫存'}])));await settle();pending[0].resolve(response(pending[0].config,productPage([{...inventoryItem,product_name:'舊庫存'}])));pending[1].reject(failure(pending[1].config,500));await settle();assert.ok(text(view.root).includes('最新庫存'));assert.ok(!text(view.root).includes('舊庫存'));assertInventoryCalls();view.app.unmount()
+})
+for(const [item,delta,endpoint] of [[inventoryItem,'+5','/admin/inventory/1'],[inventoryVariant,'-3','/admin/inventory/variants/2']])test(`Inventory ${item.stock_owner_type} ${delta} backend值/filter re-fetch/防重送/無optimistic`,async()=>{
+ let finish,adjusted=false;api.defaults.adapter=config=>{calls.push(config);if(config.url==='/categories')return Promise.resolve(response(config,{data:categoryOptions}));if(config.method==='patch')return new Promise(resolve=>{finish=()=>{adjusted=true;resolve(response(config,{data:{...item,stock:19,inventory_status:'normal'},message:'庫存調整成功'}))}});return Promise.resolve(response(config,productPage(adjusted?[]:[item],1,1)))}
+ const view=await inventoryView('/admin/inventory?inventory_status=low_stock');await click(view,'調整庫存');await inputValue(view,'inventory-adjustment',delta);await submitAdjustment(view);assert.equal(button(view,'調整中…').props.disabled,true);await submitAdjustment(view);assert.equal(calls.filter(c=>c.method==='patch').length,1);assert.ok(text(inventoryPanel(view)).includes('目前庫存：'+item.stock));assert.equal(calls.find(c=>c.method==='patch').url,endpoint);assert.deepEqual(JSON.parse(calls.find(c=>c.method==='patch').data),{adjustment:Number(delta)})
+ finish();await settle();assert.ok(text(view.root).includes('最新庫存：19'));assert.ok(text(view.root).includes('沒有符合條件的庫存'));assert.equal(calls.filter(c=>c.url==='/admin/inventory').length,2);assert.equal(calls.filter(c=>c.url==='/admin/inventory').at(-1).params.inventory_status,'low_stock');assertInventoryCalls();view.app.unmount()
+})
+test('Inventory 0 UX拒絕、放棄不送PATCH',async()=>{api.defaults.adapter=inventoryAdapter();const view=await inventoryView();await click(view,'調整庫存');await inputValue(view,'inventory-adjustment','0');await submitAdjustment(view);assert.ok(text(view.root).includes('非 0 整數'));assert.equal(calls.filter(c=>c.method==='patch').length,0);await click(view,'放棄');assert.equal(inventoryPanel(view),undefined);assertInventoryCalls();view.app.unmount()})
+for(const status of [403,419,undefined,500,422]){
+ test(`Inventory GET ${status??'network'}一般錯誤/手動retry`,async()=>{
+  api.defaults.adapter=config=>{calls.push(config);return config.url==='/categories'?Promise.resolve(response(config,{data:categoryOptions})):Promise.reject(failure(config,status))};const view=await inventoryView();assert.ok(find(view.root,el=>el.props.role==='alert'));assert.equal(auth.currentAdmin.id,admin.id);assert.equal(view.router.currentRoute.value.name,'admin-inventory');assert.equal(calls.filter(c=>c.url==='/admin/inventory').length,1);api.defaults.adapter=inventoryAdapter();await click(view,'重試');assert.ok(text(view.root).includes('庫存啞鈴'));assertInventoryCalls();view.app.unmount()
+ })
+ test(`Inventory PATCH ${status??'network'}保留stock、不retry、不清member`,async()=>{
+  api.defaults.adapter=async config=>{calls.push(config);if(config.method==='patch'){const e=failure(config,status);if(status===422)e.response.data.errors={adjustment:['調整後庫存不可小於 0']};throw e}return response(config,config.url==='/categories'?{data:categoryOptions}:productPage([inventoryItem]))};const view=await inventoryView();await click(view,'調整庫存');await inputValue(view,'inventory-adjustment','-99');await submitAdjustment(view);assert.ok(text(inventoryPanel(view)).includes('目前庫存：3'));if(status===422)assert.ok(text(view.root).includes('調整後庫存不可小於 0'));assert.ok(find(view.root,el=>el.props.role==='alert'));assert.equal(calls.filter(c=>c.method==='patch').length,1);assert.equal(auth.currentAdmin.id,admin.id);assert.equal(auth.adminFailureReason,null);assert.equal(view.router.currentRoute.value.name,'admin-inventory');assertInventoryCalls();view.app.unmount()
+ })
+}
+for(const [status,code]of [[401,undefined],[403,'ADMIN_ACCOUNT_DISABLED']])for(const phase of ['get','patch'])test(`Inventory ${phase} ${status}/${code??''}Admin coordinator/member隔離`,async()=>{
+ api.defaults.adapter=config=>{calls.push(config);if(config.url==='/categories')return Promise.resolve(response(config,{data:categoryOptions}));if(config.method===phase)return Promise.reject(failure(config,status,code));return Promise.resolve(response(config,productPage([inventoryItem])))};const view=await inventoryView();if(phase==='patch'){await click(view,'調整庫存');await inputValue(view,'inventory-adjustment','5');await submitAdjustment(view)}await settle();assert.equal(view.router.currentRoute.value.name,'admin-login');assert.equal(auth.currentAdmin,null);assertInventoryCalls();view.app.unmount()
+})
+test('Inventory晚到PATCH不覆蓋新query、不重查舊條件',async()=>{
+ let finish;api.defaults.adapter=config=>{calls.push(config);if(config.method==='patch')return new Promise(resolve=>{finish=()=>resolve(response(config,{data:{...inventoryItem,stock:999},message:'舊調整'}))});return Promise.resolve(response(config,config.url==='/categories'?{data:categoryOptions}:productPage([{...inventoryItem,product_name:config.params.search==='new'?'新條件':'舊條件'}])))}
+ const view=await inventoryView('/admin/inventory?search=old');await click(view,'調整庫存');await inputValue(view,'inventory-adjustment','5');await submitAdjustment(view);await view.router.push('/admin/inventory?search=new');await settle();const count=calls.length;finish();await settle();assert.ok(text(view.root).includes('新條件'));assert.ok(!text(view.root).includes('999'));assert.equal(calls.length,count);assertInventoryCalls();view.app.unmount()
+})
+
+test('Inventory調整成功後GET失敗：保留成功證據、手動只重試GET',async()=>{
+ let adjusted=false,failRefresh=true
+ api.defaults.adapter=async config=>{calls.push(config);if(config.url==='/categories')return response(config,{data:categoryOptions});if(config.method==='patch'){adjusted=true;return response(config,{data:{...inventoryItem,stock:8,inventory_status:'normal'},message:'庫存調整成功'})}if(adjusted&&failRefresh)throw failure(config,500);return response(config,productPage([{...inventoryItem,stock:adjusted?8:3,inventory_status:adjusted?'normal':'low_stock'}]))}
+ const view=await inventoryView();await click(view,'調整庫存');await inputValue(view,'inventory-adjustment','5');await submitAdjustment(view)
+ assert.ok(text(view.root).includes('最新庫存：8'));assert.ok(find(view.root,el=>el.props.role==='alert'));assert.equal(inventoryPanel(view),undefined)
+ failRefresh=false;await click(view,'重試');assert.equal(calls.filter(c=>c.method==='patch').length,1);assert.ok(text(view.root).includes('正常'));assertInventoryCalls();view.app.unmount()
+})
+test('Inventory分類選項失敗可獨立重試，只用公開categories',async()=>{
+ let failCategory=true;api.defaults.adapter=async config=>{calls.push(config);if(config.url==='/categories'){if(failCategory)throw failure(config,500);return response(config,{data:categoryOptions})}return response(config,productPage([inventoryItem]))}
+ const view=await inventoryView();assert.ok(text(view.root).includes('分類選項載入失敗'));assert.ok(text(view.root).includes('庫存啞鈴'));failCategory=false;await click(view,'重試分類');assert.ok(!text(view.root).includes('分類選項載入失敗'));assertInventoryCalls();view.app.unmount()
 })

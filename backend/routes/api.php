@@ -12,6 +12,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AddressController;
 use App\Http\Controllers\Api\AdminAuthController;
+use App\Http\Controllers\Api\AdminInventoryController;
 use App\Http\Controllers\Api\AdminProductController;
 use App\Http\Controllers\Api\AdminProductImageController;
 use App\Http\Controllers\Api\AuthController;
@@ -50,6 +51,9 @@ Route::prefix('admin')->group(function () {
         Route::post('/logout', [AdminAuthController::class, 'logout']);
         Route::get('/me', [AdminAuthController::class, 'me'])->middleware('admin.active');
         Route::middleware('admin.active')->group(function () {
+            Route::get('/inventory', [AdminInventoryController::class, 'index']);
+            Route::patch('/inventory/variants/{variantId}', [AdminInventoryController::class, 'adjustVariant'])->whereNumber('variantId');
+            Route::patch('/inventory/{productId}', [AdminInventoryController::class, 'adjustProduct'])->whereNumber('productId');
             Route::get('/products', [AdminProductController::class, 'index']);
             Route::get('/products/{id}', [AdminProductController::class, 'show'])->whereNumber('id');
             Route::post('/products', [AdminProductController::class, 'store']);
