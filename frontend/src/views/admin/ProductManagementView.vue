@@ -205,3 +205,15 @@ onBeforeUnmount(() => {
     />
   </section>
 </template>
+
+<style scoped>
+/* Keep identifiers readable; the existing table-responsive owns horizontal scrolling. */
+table {
+  min-width: 760px;
+  overflow-wrap: normal;
+}
+th,
+td:first-child {
+  white-space: nowrap;
+}
+</style>

@@ -313,3 +313,17 @@ onBeforeUnmount(() => {
     />
   </section>
 </template>
+
+<style scoped>
+/* Stock-owner columns scroll locally instead of squeezing identifiers into single letters. */
+table {
+  min-width: 900px;
+  overflow-wrap: normal;
+}
+th {
+  white-space: nowrap;
+}
+td:first-child {
+  min-width: 160px;
+}
+</style>
