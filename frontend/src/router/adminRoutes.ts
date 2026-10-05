@@ -6,6 +6,7 @@ import AdminPlaceholderView from '@/views/admin/AdminPlaceholderView.vue'
 import AdminNotFoundView from '@/views/admin/AdminNotFoundView.vue'
 import ProductManagementView from '@/views/admin/ProductManagementView.vue'
 import InventoryManagementView from '@/views/admin/InventoryManagementView.vue'
+import CategoryManagementView from '@/views/admin/CategoryManagementView.vue'
 import AdminProductDetailView from '@/views/admin/AdminProductDetailView.vue'
 import AdminProductFormView from '@/views/admin/AdminProductFormView.vue'
 import { setAdminNavigationCallbacks } from '@/services/adminSessionNavigation'
@@ -40,8 +41,8 @@ export const adminRoutes: RouteRecordRaw[] = [
       { path: '', redirect: '/admin/dashboard' },
       ...adminModules.map((module) => ({
         path: module.path, name: 'admin-' + module.path,
-        component: module.path === 'products' ? ProductManagementView : module.path === 'inventory' ? InventoryManagementView : AdminPlaceholderView,
-        props: ['products', 'inventory'].includes(module.path) ? undefined : { title: module.title, stage: module.stage }, meta: { requiresAdmin: true },
+        component: module.path === 'products' ? ProductManagementView : module.path === 'inventory' ? InventoryManagementView : module.path === 'categories' ? CategoryManagementView : AdminPlaceholderView,
+        props: ['products', 'inventory', 'categories'].includes(module.path) ? undefined : { title: module.title, stage: module.stage }, meta: { requiresAdmin: true },
       })),
       { path: 'products/new', name: 'admin-product-create', component: AdminProductFormView, meta: { requiresAdmin: true } },
       { path: 'products/:id/edit', name: 'admin-product-edit', component: AdminProductFormView, meta: { requiresAdmin: true } },

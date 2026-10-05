@@ -28,6 +28,7 @@ const adminViews = {
   ProductForm: '/src/components/admin/ProductForm.vue', AdminProductFormView: '/src/views/admin/AdminProductFormView.vue',
   ProductImageManager: '/src/components/admin/ProductImageManager.vue',
   InventoryManagementView: '/src/views/admin/InventoryManagementView.vue',
+  CategoryManagementView: '/src/views/admin/CategoryManagementView.vue',
 }
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', plugins: [{
   name: 'admin-test-sfc', enforce: 'pre',
@@ -57,6 +58,7 @@ const { default: Login } = await server.ssrLoadModule('virtual:admin-login')
 const routes = await server.ssrLoadModule('/src/router/adminRoutes.ts')
 const productService = await server.ssrLoadModule('/src/services/adminProductService.ts')
 const inventoryService = await server.ssrLoadModule('/src/services/adminInventoryService.ts')
+const categoryService = await server.ssrLoadModule('/src/services/adminCategoryService.ts')
 const originalError = console.error
 console.error = () => {}
 after(async () => { console.error = originalError; await server.close() })
@@ -68,6 +70,11 @@ const payload = { email: admin.email, password: 'test-only' }
 const key = 'home-fitness-store-guest-cart'
 const guest = JSON.stringify([{ key: '99:none', product_id: 99, product_variant_id: null, quantity: 1 }])
 const categoryOptions = [{ id: 1, name: '器材', children: [{ id: 2, name: '啞鈴' }] }]
+const adminCategoryTree = [{ id: 1, name: '管理根分類', status: 'inactive', sort_order: 2, children_count: 2,
+  created_at: '2026-10-05T00:00:00Z', updated_at: '2026-10-05T00:00:00Z', children: [
+    { id: 2, parent_id: 1, name: '啟用子分類', status: 'active', sort_order: 1, product_count: 3, created_at: null, updated_at: null },
+    { id: 3, parent_id: 1, name: '停用子分類', status: 'inactive', sort_order: 2, product_count: 0, created_at: null, updated_at: null },
+  ] }, { id: 4, name: '空根分類', status: 'active', sort_order: 3, children_count: 0, children: [], created_at: null, updated_at: null }]
 const productItem = {
   id: 1, product_code: 'PRD-EXISTING', name: '測試啞鈴', category: { id: 2, name: '啞鈴', status: 'inactive' },
   price: '1234.50', stock: null, has_variants: true, low_stock_threshold: 5, status: 'inactive',
@@ -100,6 +107,7 @@ beforeEach(() => {
   api.defaults.adapter = async (config) => {
     calls.push(config)
     if (config.url === '/categories') return response(config, { data: categoryOptions })
+    if (config.url === '/admin/categories') return response(config, { data: adminCategoryTree })
     if (config.url === '/admin/products') return response(config, productPage())
     if (config.url === '/admin/inventory') return response(config, productPage([]))
     if (config.url.startsWith('/admin/products/')) return response(config, { data: productDetail })
@@ -344,7 +352,7 @@ const mountRoute = async (url, instance = memoryRouter()) => {
   return { ...instance, root, app }
 }
 
-for (const path of ['/admin/dashboard', '/admin/orders', '/admin/does-not-exist', '/admin/products', '/admin/products/1', '/admin/products/new', '/admin/products/1/edit', '/admin/inventory']) {
+for (const path of ['/admin/dashboard', '/admin/orders', '/admin/does-not-exist', '/admin/products', '/admin/products/1', '/admin/products/new', '/admin/products/1/edit', '/admin/inventory', '/admin/categories']) {
   test(`guest/member-only ${path} 經真 guard 導登入；會員身分不等於 Admin`, async () => {
     auth.currentAdmin = null
     api.defaults.adapter = (config) => { calls.push(config); return Promise.reject(failure(config, 401)) }
@@ -355,7 +363,7 @@ for (const path of ['/admin/dashboard', '/admin/orders', '/admin/does-not-exist'
     assertMemberUntouched(); view.app.unmount()
   })
 }
-test('Admin-only 八模組保持階段對照，只有 products 已有唯讀 API', async () => {
+test('Admin-only 八模組保持階段對照，products／inventory／categories 已接真實頁面', async () => {
   auth.isAdminInitialized = true; member.currentUser = null
   const view = await mountRoute('/admin')
   assert.equal(view.router.currentRoute.value.fullPath, '/admin/dashboard')
@@ -368,11 +376,11 @@ test('Admin-only 八模組保持階段對照，只有 products 已有唯讀 API'
     await view.router.push('/admin/' + item.path); await settle()
     const main = find(view.root, (el) => el.type === 'main')
     assert.ok(text(main).includes(item.title))
-    if (['products', 'inventory'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
+    if (['products', 'inventory', 'categories'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
     else { assert.ok(text(main).includes('尚未實作')); assert.ok(text(main).includes('Stage ' + item.stage)) }
   }
   assert.deepEqual(routes.adminModules.map((item) => item.stage), [24, 19, 20, 19, 21, 21, 22, 23])
-  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/inventory', '/admin/products', '/categories', '/categories']); assert.equal(member.currentUser, null)
+  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/categories', '/admin/inventory', '/admin/products', '/categories', '/categories']); assert.equal(member.currentUser, null)
   const frontLink = find(view.root, (el) => el.type === 'a' && el.props.href === '/')
   assert.ok(frontLink); assert.equal(frontLink.props.onClick, undefined)
   const menu = find(view.root, (el) => el.type === 'button' && text(el) === '選單')
@@ -1063,4 +1071,117 @@ test('Inventory調整成功後GET失敗：保留成功證據、手動只重試GE
 test('Inventory分類選項失敗可獨立重試，只用公開categories',async()=>{
  let failCategory=true;api.defaults.adapter=async config=>{calls.push(config);if(config.url==='/categories'){if(failCategory)throw failure(config,500);return response(config,{data:categoryOptions})}return response(config,productPage([inventoryItem]))}
  const view=await inventoryView();assert.ok(text(view.root).includes('分類選項載入失敗'));assert.ok(text(view.root).includes('庫存啞鈴'));failCategory=false;await click(view,'重試分類');assert.ok(!text(view.root).includes('分類選項載入失敗'));assertInventoryCalls();view.app.unmount()
+})
+
+const categoriesView = async () => {
+  auth.isAdminInitialized = true
+  return mountRoute('/admin/categories')
+}
+const assertCategoryCalls = () => {
+  assert.ok(calls.every(c => c.url === '/admin/categories' && c.method === 'get'))
+  assertMemberUntouched()
+}
+
+test('Admin分類service只透過獨立adminApi讀取完整envelope，不借用公開分類', async () => {
+  memberApi.defaults.adapter = () => { throw new Error('Admin不能使用會員transport') }
+  const result = await categoryService.getAdminCategories()
+  assert.deepEqual(result, { data: adminCategoryTree })
+  assert.equal(calls.length, 1); assertCategoryCalls()
+})
+
+test('分類頁取代placeholder，顯示兩態、排序、children/product counts與無子分類狀態', async () => {
+  const view = await categoriesView()
+  const main = find(view.root, el => el.type === 'main')
+  for (const expected of ['商品分類管理', '管理根分類', '啟用子分類', '停用子分類', '空根分類',
+    '狀態：啟用', '狀態：停用', '排序：2', '子分類：2', '商品：3', '商品：0', '此分類尚無子分類']) {
+    assert.ok(text(main).includes(expected), expected)
+  }
+  assert.ok(!text(main).includes('尚未實作'))
+  assert.equal(find(main, el => el.type === 'button'), undefined, '正常唯讀畫面沒有mutation假按鈕')
+  assert.equal(find(main, el => el.type === 'form'), undefined, '不提供搜尋或分頁')
+  assertCategoryCalls(); view.app.unmount()
+})
+
+test('分類頁initial loading與空data狀態，不顯示假分類', async () => {
+  let finish
+  api.defaults.adapter = config => { calls.push(config); return new Promise(resolve => {
+    finish = () => resolve(response(config, { data: [] }))
+  }) }
+  const view = await categoriesView()
+  assert.ok(text(view.root).includes('分類載入中'))
+  assert.ok(!text(view.root).includes('目前沒有分類'))
+  finish(); await settle()
+  assert.ok(text(view.root).includes('目前沒有分類'))
+  assertCategoryCalls(); view.app.unmount()
+})
+
+for (const status of [403, 419, undefined, 500]) {
+  test(`分類GET ${status ?? 'network'}為一般錯誤，手動重試GET，不清Admin或會員`, async () => {
+    api.defaults.adapter = config => { calls.push(config); return Promise.reject(failure(config, status)) }
+    const view = await categoriesView()
+    assert.ok(find(view.root, el => el.props.role === 'alert'))
+    assert.equal(auth.currentAdmin.id, admin.id); assert.equal(auth.adminFailureReason, null)
+    assert.equal(view.router.currentRoute.value.name, 'admin-categories')
+    assert.equal(calls.length, 1, '沒有自動重送')
+    api.defaults.adapter = async config => { calls.push(config); return response(config, { data: adminCategoryTree }) }
+    await find(view.root, el => el.type === 'button' && text(el) === '重試').props.onClick(); await settle()
+    assert.ok(text(view.root).includes('管理根分類'))
+    assert.equal(find(view.root, el => el.props.role === 'alert'), undefined)
+    assert.equal(calls.length, 2); assertCategoryCalls(); view.app.unmount()
+  })
+}
+
+for (const [status, code] of [[401, undefined], [403, 'ADMIN_ACCOUNT_DISABLED']]) {
+  test(`分類GET ${status}/${code ?? ''}沿用Admin coordinator，會員/cart/localStorage保留`, async () => {
+    api.defaults.adapter = config => { calls.push(config); return Promise.reject(failure(config, status, code)) }
+    const view = await categoriesView(); await settle()
+    assert.equal(auth.currentAdmin, null)
+    assert.equal(view.router.currentRoute.value.name, 'admin-login')
+    if (code) assert.ok(text(view.root).includes('後端停用原因'))
+    assertCategoryCalls(); view.app.unmount()
+  })
+}
+
+test('分類快速重試：晚到舊成功／失敗均不覆蓋最新管理樹', async () => {
+  api.defaults.adapter = config => { calls.push(config); return Promise.reject(failure(config, 500)) }
+  const view = await categoriesView()
+  const retry = find(view.root, el => el.type === 'button' && text(el) === '重試').props.onClick
+  const pending = []
+  api.defaults.adapter = config => { calls.push(config); return new Promise((resolve, reject) => pending.push({ config, resolve, reject })) }
+  const first = retry(), second = retry(), newest = retry(); await settle()
+  assert.equal(pending.length, 3)
+  pending[2].resolve(response(pending[2].config, { data: [{ ...adminCategoryTree[0], name: '最新分類' }] }))
+  await newest; await settle()
+  pending[0].resolve(response(pending[0].config, { data: [{ ...adminCategoryTree[0], name: '過時分類' }] }))
+  pending[1].reject(failure(pending[1].config, 500))
+  await Promise.all([first, second]); await settle()
+  assert.ok(text(view.root).includes('最新分類')); assert.ok(!text(view.root).includes('過時分類'))
+  assert.equal(find(view.root, el => el.props.role === 'alert'), undefined)
+  assertCategoryCalls(); view.app.unmount()
+})
+
+test('離開分類route後晚到GET不覆蓋其他模組，返回時重新讀取', async () => {
+  let finish
+  api.defaults.adapter = config => { calls.push(config); return new Promise(resolve => {
+    finish = () => resolve(response(config, { data: adminCategoryTree }))
+  }) }
+  const view = await categoriesView()
+  await view.router.push('/admin/orders'); await settle()
+  finish(); await settle()
+  const main = find(view.root, el => el.type === 'main')
+  assert.ok(text(main).includes('訂單管理')); assert.ok(!text(main).includes('管理根分類'))
+  api.defaults.adapter = async config => { calls.push(config); return response(config, { data: adminCategoryTree }) }
+  await view.router.push('/admin/categories'); await settle()
+  assert.ok(text(view.root).includes('管理根分類')); assert.equal(calls.length, 2)
+  assertCategoryCalls(); view.app.unmount()
+})
+
+test('分類protected URL重新開啟先restoreAdmin，再GET管理樹', async () => {
+  auth.currentAdmin = null; auth.isAdminInitialized = false
+  api.defaults.adapter = async config => { calls.push(config); return response(config,
+    { data: config.url === '/admin/me' ? admin : adminCategoryTree }) }
+  const view = await mountRoute('/admin/categories')
+  assert.equal(view.router.currentRoute.value.name, 'admin-categories')
+  assert.deepEqual(calls.map(c => c.url), ['/admin/me', '/admin/categories'])
+  assert.ok(text(view.root).includes('管理根分類')); assertMemberUntouched(); view.app.unmount()
 })
