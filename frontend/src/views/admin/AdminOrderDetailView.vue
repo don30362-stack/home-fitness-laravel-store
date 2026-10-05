@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import axios from 'axios'
-import { getAdminOrder, updateAdminOrderStatus, updateAdminOrderPaymentStatus, updateAdminOrderShipment } from '@/services/adminOrderService'
+import { getAdminOrder, updateAdminOrderStatus, updateAdminOrderPaymentStatus, updateAdminOrderShipment, cancelAdminOrder } from '@/services/adminOrderService'
 import type { AdminOrderDetail } from '@/types/adminOrder'
 import type { ApiErrorResponse } from '@/types/api'
 
@@ -11,6 +11,7 @@ const order = ref<AdminOrderDetail | null>(null)
 const isLoading = ref(false), errorMessage = ref('')
 const mutationPending = ref(false), mutationMessage = ref(''), mutationError = ref(''), refreshError = ref('')
 const company = ref(''), tracking = ref('')
+const cancelConfirm = ref(false)
 let requestId = 0
 let contextVersion = 0
 const controlsDisabled = computed(() => mutationPending.value || isLoading.value || Boolean(refreshError.value))
@@ -46,22 +47,34 @@ const load = async () => {
   if (mutationPending.value || isLoading.value) return
   await fetchDetail(Boolean(order.value))
 }
-const mutate = async (action: 'processing' | 'completed' | 'payment' | 'shipment') => {
+const openCancel = () => {
+  if (controlsDisabled.value || !order.value || !['pending', 'processing'].includes(order.value.order_status)) return
+  cancelConfirm.value = true
+}
+const closeCancel = () => {
+  if (mutationPending.value) return
+  cancelConfirm.value = false
+}
+const mutate = async (action: 'processing' | 'completed' | 'payment' | 'shipment' | 'cancel') => {
   if (controlsDisabled.value || !order.value) return
+  if (action === 'cancel' && !cancelConfirm.value) return
   const context = contextVersion
   const id = String(order.value.id)
   mutationPending.value = true
   mutationMessage.value = ''
   mutationError.value = ''
   try {
-    const result = action === 'payment'
+    const result = action === 'cancel'
+      ? await cancelAdminOrder(id)
+      : action === 'payment'
       ? await updateAdminOrderPaymentStatus(id, { payment_status: 'paid' })
       : action === 'shipment'
         ? await updateAdminOrderShipment(id, { logistics_company: company.value.trim(), tracking_number: tracking.value.trim() })
         : await updateAdminOrderStatus(id, { order_status: action })
     if (context !== contextVersion) return
+    cancelConfirm.value = false
     mutationMessage.value = result.message
-    // PATCH success is retained even if the authoritative GET fails. Never retry the PATCH.
+    // Mutation success is retained even if the authoritative GET fails. Never retry the mutation.
     await fetchDetail(true)
   } catch (error) {
     if (context !== contextVersion) return
@@ -76,6 +89,7 @@ const formatDate = (value: string | null) => value ? new Date(value).toLocaleStr
 watch(() => route.params.id, () => {
   ++contextVersion
   mutationPending.value = false
+  cancelConfirm.value = false
   mutationMessage.value = ''
   mutationError.value = ''
   company.value = ''
@@ -108,7 +122,15 @@ onBeforeUnmount(() => { ++contextVersion; ++requestId })
           <button v-if="order.order_status === 'pending'" type="button" class="btn btn-primary" :disabled="controlsDisabled" @click="mutate('processing')">設為處理中</button>
           <button v-if="order.order_status === 'shipped' && order.payment_status === 'paid'" type="button" class="btn btn-primary" :disabled="controlsDisabled" @click="mutate('completed')">設為已完成</button>
           <button v-if="order.payment_status === 'unpaid' && order.order_status !== 'cancelled'" type="button" class="btn btn-outline-primary" :disabled="controlsDisabled" @click="mutate('payment')">標記為已付款</button>
+          <button v-if="order.order_status === 'pending' || order.order_status === 'processing'" type="button" class="btn btn-outline-danger" :disabled="controlsDisabled" @click="openCancel">取消訂單</button>
           <button type="button" class="btn btn-outline-secondary" :disabled="controlsDisabled" @click="load">重新讀取訂單</button>
+        </div>
+        <div v-if="cancelConfirm" aria-label="取消訂單確認" class="alert alert-warning">
+          <p>確定取消訂單 {{ order.order_no }} 嗎？取消後訂單會成為已取消（cancelled），商品庫存會依原訂單明細恢復。付款狀態會保持原值；若已付款仍維持已付款，本系統不會自動退款。</p>
+          <div class="d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-danger" :disabled="controlsDisabled" @click="mutate('cancel')">確認取消訂單</button>
+            <button type="button" class="btn btn-outline-secondary" :disabled="controlsDisabled" @click="closeCancel">返回，不取消</button>
+          </div>
         </div>
         <p v-if="order.order_status === 'shipped' && order.payment_status === 'unpaid'">訂單尚未付款，請先標記為已付款後再完成。</p>
         <form v-if="order.order_status === 'processing' || order.order_status === 'shipped'" aria-label="物流維護表單" class="row g-3" @submit.prevent="mutate('shipment')">

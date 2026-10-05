@@ -16,3 +16,6 @@ export const updateAdminOrderPaymentStatus = async (id: string, payload: UpdateA
 
 export const updateAdminOrderShipment = async (id: string, payload: UpdateAdminOrderShipmentPayload): Promise<AdminOrderMutationResponse> =>
   (await adminApi.patch<AdminOrderMutationResponse>(`/admin/orders/${id}/shipment`, payload)).data
+
+export const cancelAdminOrder = async (id: string): Promise<AdminOrderMutationResponse> =>
+  (await adminApi.post<AdminOrderMutationResponse>(`/admin/orders/${id}/cancel`)).data

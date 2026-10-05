@@ -1680,13 +1680,13 @@ const invokeLifecycle = async (view,endpoint,label) => {
   } else await click(view,label)
 }
 
-test('Admin Order lifecycle services use three strict PATCH endpoints/adminApi; no cancel service',async()=>{
+test('Admin Order lifecycle services use three strict PATCH endpoints/adminApi',async()=>{
   api.defaults.adapter=async c=>{calls.push(c);return response(c,{data:adminOrderDetail,message:'backend message'})}
   const payloads=[{order_status:'processing'},{payment_status:'paid'},{logistics_company:'company',tracking_number:'tracking'}]
   const services=[orderService.updateAdminOrderStatus,orderService.updateAdminOrderPaymentStatus,orderService.updateAdminOrderShipment]
   for(let i=0;i<services.length;i++)assert.deepEqual(await services[i](1,payloads[i]),{data:adminOrderDetail,message:'backend message'})
   assert.deepEqual(calls.map(c=>[c.method,c.url,JSON.parse(c.data)]),payloads.map((p,i)=>['patch',`/admin/orders/1/${['status','payment-status','shipment'][i]}`,p]))
-  assert.equal(orderService.cancelAdminOrder,undefined);lifecycleBoundary()
+  lifecycleBoundary()
 })
 for(const [state,paid,statusAction,shipment,payment] of [
   ['pending','unpaid','設為處理中',false,true],['processing','unpaid',null,true,true],
@@ -1798,4 +1798,101 @@ test('Old mutation finally cannot unlock a newer order mutation',async()=>{
  button(view,'設為處理中').props.onClick();await settle();assert.equal(mutations().length,2)
  finishes['/admin/orders/2/payment-status']();await settle();await settle();assert.equal(button(view,'重新讀取訂單').props.disabled,false)
  lifecycleBoundary();view.app.unmount()
+})
+
+// Stage 21 Step 3: shared cancel entry, confirmation and page-local lifecycle.
+const cancelBoundary = () => {
+ assert.ok(calls.every(c=>c.method==='get'?/^\/admin\/orders\/\d+$/.test(c.url)
+  :c.method==='post'?/^\/admin\/orders\/\d+\/cancel$/.test(c.url)&&c.data===undefined
+  :c.method==='patch'&&/^\/admin\/orders\/\d+\/(status|payment-status|shipment)$/.test(c.url)))
+ assertMemberUntouched()
+}
+const confirmCancel = async view=>{await click(view,'取消訂單');await click(view,'確認取消訂單')}
+test('Admin cancel service POSTs no body through existing adminApi',async()=>{
+ api.defaults.adapter=async c=>{calls.push(c);return response(c,{data:adminOrderDetail,message:'訂單已取消。'})}
+ assert.deepEqual(await orderService.cancelAdminOrder('7'),{data:adminOrderDetail,message:'訂單已取消。'})
+ assert.equal(calls[0].url,'/admin/orders/7/cancel');cancelBoundary()
+})
+for(const state of ['pending','processing','shipped','completed','cancelled']) {
+ test(`Admin cancel ${state}: correct button eligibility/confirmation without request`,async()=>{
+  api.defaults.adapter=async c=>{calls.push(c);return response(c,{data:{...adminOrderDetail,order_status:state,payment_status:'paid'}})}
+  const view=await ordersView('/admin/orders/1');assert.equal(Boolean(button(view,'取消訂單')),['pending','processing'].includes(state))
+  if(['pending','processing'].includes(state)) {
+   await click(view,'取消訂單');const dialog=find(view.root,el=>el.props['aria-label']==='取消訂單確認');assert.ok(dialog)
+   for(const value of ['HF-READ-001','cancelled','恢復','不會自動退款','付款狀態會保持原值'])assert.ok(text(dialog).includes(value))
+   assert.equal(mutations().length,0);await click(view,'返回，不取消');assert.equal(find(view.root,el=>el.props['aria-label']==='取消訂單確認'),undefined)
+  }
+  assert.equal(mutations().length,0);cancelBoundary();view.app.unmount()
+ })
+}
+for(const state of ['pending','processing']) {
+ test(`Admin cancel ${state}: direct handler mutex/no optimistic/success closes/GET authority`,async()=>{
+  let finish,done=false
+  api.defaults.adapter=c=>{calls.push(c);if(c.method==='post')return new Promise(resolve=>{finish=()=>{done=true;resolve(response(c,{data:{...adminOrderDetail,order_no:'PATCH-NOT-AUTHORITY'},message:'後端取消成功'}))}})
+   return Promise.resolve(response(c,{data:{...adminOrderDetail,order_no:done?'GET-CANCEL-AUTHORITY':'HF-READ-001',order_status:done?'cancelled':state,payment_status:'paid'}}))}
+  const view=await ordersView('/admin/orders/1');await confirmCancel(view)
+  const collect=el=>{if(el.type==='button'){assert.equal(el.props.disabled,true);if(el.props.onClick)el.props.onClick()}el.children.forEach(collect)}
+  collect(find(view.root,el=>el.props['aria-label']==='訂單處理操作'))
+  const form=find(view.root,el=>el.props['aria-label']==='物流維護表單');if(form)form.props.onSubmit({preventDefault(){}})
+  await settle();assert.equal(mutations().length,1);assert.equal(calls.length,2)
+  assert.ok(text(view.root).includes('HF-READ-001'));assert.ok(find(view.root,el=>el.props['aria-label']==='取消訂單確認'))
+  finish();await settle();await settle()
+  assert.ok(text(view.root).includes('後端取消成功'));assert.ok(text(view.root).includes('GET-CANCEL-AUTHORITY'));assert.ok(!text(view.root).includes('PATCH-NOT-AUTHORITY'))
+  assert.equal(find(view.root,el=>el.props['aria-label']==='取消訂單確認'),undefined);assert.equal(button(view,'取消訂單'),undefined)
+  assert.equal(button(view,'重新讀取訂單').props.disabled,false);assert.equal(calls.filter(c=>c.method==='get').length,2)
+  cancelBoundary();view.app.unmount()
+ })
+}
+for(const [status,code] of [[422],[403],[419],[undefined],[500],[401],[403,'ADMIN_ACCOUNT_DISABLED']]) {
+ test(`Admin cancel ${status}/${code??''}: original detail/confirmation/no retry/member isolation`,async()=>{
+  api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:adminOrderDetail}))
+   const e=failure(c,status,code);if(status===422)e.response.data.errors={order:['此訂單目前的狀態不允許取消。']};return Promise.reject(e)}
+  const view=await ordersView('/admin/orders/1');await confirmCancel(view);await settle()
+  assert.equal(mutations().length,1);assert.equal(calls.filter(c=>c.method==='get').length,1)
+  if(status===401||code){assert.equal(auth.currentAdmin,null);assert.equal(view.router.currentRoute.value.name,'admin-login')}
+  else {
+   assert.ok(auth.currentAdmin);assert.equal(auth.adminFailureReason,null);assert.ok(text(view.root).includes('HF-READ-001'))
+   assert.ok(text(view.root).includes(status===422?'此訂單目前的狀態不允許取消。':status?'後端停用原因':'訂單操作失敗'))
+   assert.equal(button(view,'確認取消訂單').props.disabled,false);assert.equal(button(view,'設為處理中').props.disabled,false)
+  }
+  cancelBoundary();view.app.unmount()
+ })
+}
+
+test('Admin cancel success + refresh failure retains success; stale operations blocked/manual retry GET only',async()=>{
+ let reads=0
+ api.defaults.adapter=c=>{calls.push(c);if(c.method==='post')return Promise.resolve(response(c,{data:adminOrderDetail,message:'訂單已取消。'}))
+  if(++reads===2)return Promise.reject(failure(c,500));return Promise.resolve(response(c,{data:{...adminOrderDetail,order_status:reads===1?'pending':'cancelled'}}))}
+ const view=await ordersView('/admin/orders/1');await confirmCancel(view);await settle()
+ assert.ok(text(view.root).includes('訂單已取消。'));assert.ok(text(view.root).includes('最新資料重新載入失敗'))
+ assert.equal(find(view.root,el=>el.props['aria-label']==='取消訂單確認'),undefined)
+ for(const label of ['設為處理中','標記為已付款','取消訂單']){assert.equal(button(view,label).props.disabled,true);button(view,label).props.onClick()}
+ await settle();assert.equal(mutations().length,1);await click(view,'重試讀取')
+ assert.equal(mutations().length,1);assert.equal(reads,3);assert.ok(text(view.root).includes('訂單已取消。'));assert.equal(button(view,'取消訂單'),undefined)
+ assert.ok(!text(view.root).includes('最新資料重新載入失敗'));cancelBoundary();view.app.unmount()
+})
+for(const phase of ['cancel','refresh'])for(const outcome of ['success','error'])for(const destination of ['/admin/orders/2','/admin/dashboard']) {
+ test(`Admin cancel late ${phase} ${outcome} after ${destination}: context isolation`,async()=>{
+  let finish,reads=0
+  api.defaults.adapter=c=>{calls.push(c)
+   const defer=()=>new Promise((resolve,reject)=>{finish=()=>outcome==='success'?resolve(response(c,{data:{...adminOrderDetail,order_no:'LATE-CANCEL'},message:'LATE-CANCEL-MESSAGE'})):reject(failure(c,500))})
+   if(c.method==='post')return phase==='cancel'?defer():Promise.resolve(response(c,{data:adminOrderDetail,message:'LATE-CANCEL-MESSAGE'}))
+   if(c.url.endsWith('/2'))return Promise.resolve(response(c,{data:{...adminOrderDetail,id:2,order_no:'SECOND-ORDER'}}))
+   return ++reads===1?Promise.resolve(response(c,{data:adminOrderDetail})):defer()}
+  const view=await ordersView('/admin/orders/1');await confirmCancel(view);await settle();await view.router.push(destination);await settle();finish();await settle();await settle()
+  assert.equal(view.router.currentRoute.value.path,destination);if(destination.endsWith('/2'))assert.ok(text(view.root).includes('SECOND-ORDER'))
+  for(const forbidden of ['LATE-CANCEL','後端停用原因','最新資料重新載入失敗'])assert.ok(!text(view.root).includes(forbidden))
+  assert.equal(calls.filter(c=>c.method==='get'&&c.url.endsWith('/1')).length,phase==='cancel'?1:2)
+  cancelBoundary();view.app.unmount()
+ })
+}
+test('Old cancel finally cannot unlock newer order mutation or restore its confirmation',async()=>{
+ const finishes={}
+ api.defaults.adapter=c=>{calls.push(c);if(c.method!=='get')return new Promise(resolve=>{finishes[c.url]=()=>resolve(response(c,{data:adminOrderDetail,message:'old cancel message'}))})
+  const id=c.url.endsWith('/2')?2:1;return Promise.resolve(response(c,{data:{...adminOrderDetail,id,order_no:`ORDER-${id}`}}))}
+ const view=await ordersView('/admin/orders/1');await confirmCancel(view);await view.router.push('/admin/orders/2');await settle();await click(view,'標記為已付款')
+ finishes['/admin/orders/1/cancel']();await settle();assert.equal(button(view,'取消訂單').props.disabled,true)
+ button(view,'取消訂單').props.onClick();await settle();assert.equal(mutations().length,2);assert.equal(find(view.root,el=>el.props['aria-label']==='取消訂單確認'),undefined)
+ assert.ok(!text(view.root).includes('old cancel message'));finishes['/admin/orders/2/payment-status']();await settle();await settle()
+ assert.equal(button(view,'重新讀取訂單').props.disabled,false);cancelBoundary();view.app.unmount()
 })

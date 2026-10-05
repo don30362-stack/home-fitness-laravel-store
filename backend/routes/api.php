@@ -58,6 +58,7 @@ Route::prefix('admin')->group(function () {
             Route::patch('/orders/{id}/status', [AdminOrderController::class, 'updateStatus'])->whereNumber('id');
             Route::patch('/orders/{id}/payment-status', [AdminOrderController::class, 'updatePaymentStatus'])->whereNumber('id');
             Route::patch('/orders/{id}/shipment', [AdminOrderController::class, 'updateShipment'])->whereNumber('id');
+            Route::post('/orders/{id}/cancel', [AdminOrderController::class, 'cancel'])->whereNumber('id');
             Route::get('/categories', [AdminCategoryController::class, 'index']);
             Route::post('/categories', [AdminCategoryController::class, 'store']);
             Route::patch('/categories/{id}/status', [AdminCategoryController::class, 'status'])->whereNumber('id');

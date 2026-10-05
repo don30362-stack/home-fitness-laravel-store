@@ -247,7 +247,7 @@ class AdminOrderApiTest extends TestCase
         $this->assertSame(4, $counts[0]); // admin.active + paginator count + orders + eager-loaded users.
     }
 
-    public function test_stage21_routes_only_contain_reads_and_three_lifecycle_patches(): void
+    public function test_stage21_routes_only_contain_reads_lifecycle_and_cancel(): void
     {
         $paths = [];
         foreach (app('router')->getRoutes() as $route) {
@@ -259,6 +259,7 @@ class AdminOrderApiTest extends TestCase
             'api/admin/orders' => ['GET', 'HEAD'], 'api/admin/orders/{id}' => ['GET', 'HEAD'],
             'api/admin/orders/{id}/status' => ['PATCH'], 'api/admin/orders/{id}/payment-status' => ['PATCH'],
             'api/admin/orders/{id}/shipment' => ['PATCH'],
+            'api/admin/orders/{id}/cancel' => ['POST'],
         ], $paths);
     }
 }

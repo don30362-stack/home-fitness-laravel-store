@@ -11,11 +11,20 @@ use App\Http\Resources\AdminOrderResource;
 use App\Http\Resources\AdminOrderSummaryResource;
 use App\Models\Order;
 use App\Services\AdminOrderService;
+use App\Services\OrderCancellationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class AdminOrderController extends Controller
 {
+    public function cancel(string $id, OrderCancellationService $service): AdminOrderResource
+    {
+        $order = $service->cancel((int) $id);
+        $order->loadMissing('user:id,name,email,status');
+
+        return (new AdminOrderResource($order))->additional(['message' => '訂單已取消。']);
+    }
+
     public function updateStatus(UpdateAdminOrderStatusRequest $request, string $id, AdminOrderService $service): AdminOrderResource
     {
         return (new AdminOrderResource($service->updateStatus((int) $id, $request->validated('order_status'))))
