@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreAdminCategoryRequest;
 use App\Http\Requests\UpdateAdminCategoryRequest;
+use App\Http\Requests\UpdateAdminCategoryStatusRequest;
 use App\Http\Resources\AdminCategoryMutationResource;
 use App\Http\Resources\AdminCategoryResource;
 use App\Models\Category;
@@ -27,6 +28,12 @@ class AdminCategoryController extends Controller
         $category = $service->loadManagementData($service->update($id, $request->validated()));
 
         return (new AdminCategoryMutationResource($category))->additional(['message' => '分類更新成功。']);
+    }
+
+    public function status(UpdateAdminCategoryStatusRequest $request, int $id, AdminCategoryService $service): AdminCategoryMutationResource
+    {
+        $category = $service->loadManagementData($service->changeStatus($id, $request->validated('status')));
+        return (new AdminCategoryMutationResource($category))->additional(['message' => '分類狀態更新成功。']);
     }
 
     public function index(): AnonymousResourceCollection

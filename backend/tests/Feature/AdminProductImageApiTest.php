@@ -33,7 +33,8 @@ class AdminProductImageApiTest extends TestCase
 
     private function product(): Product
     {
-        return Product::factory()->create(['category_id' => Category::query()->create(['name' => '圖片測試分類'])->id]);
+        $root = Category::create(['name' => '圖片主分類', 'status' => 'active']);
+        return Product::factory()->create(['category_id' => Category::query()->create(['parent_id' => $root->id, 'name' => '圖片測試分類'])->id]);
     }
 
     private function login(): void

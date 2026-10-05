@@ -279,7 +279,8 @@ class MemberStatusApiTest extends TestCase
             'address' => '臺灣大道三段100號',
         ];
         $address = $user->userAddresses()->create($addressPayload + ['is_default' => true]);
-        $category = Category::query()->create(['name' => '測試分類', 'status' => 'active', 'sort_order' => 0]);
+        $root = Category::query()->create(['name' => '測試主分類', 'status' => 'active']);
+        $category = Category::query()->create(['parent_id' => $root->id, 'name' => '測試分類', 'status' => 'active', 'sort_order' => 0]);
         $product = Product::factory()->create(['category_id' => $category->id, 'stock' => 10]);
         $variantProduct = Product::factory()->create(['category_id' => $category->id, 'stock' => null]);
         $variant = $variantProduct->variants()->create([

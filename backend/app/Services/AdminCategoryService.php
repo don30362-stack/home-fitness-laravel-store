@@ -55,6 +55,22 @@ class AdminCategoryService
         });
     }
 
+    public function changeStatus(int $id, string $status): Category
+    {
+        return DB::transaction(function () use ($id, $status) {
+            $category = Category::query()->lockForUpdate()->findOrFail($id);
+            if ($category->parent_id !== null) {
+                $parent = Category::find($category->parent_id);
+                if (! $parent || $parent->parent_id !== null) {
+                    $this->reject('status', '異常分類階層不可變更狀態。');
+                }
+            }
+            $category->status = $status;
+            $category->save();
+            return $category;
+        });
+    }
+
     public function loadManagementData(Category $category): Category
     {
         return $category->loadCount(['children', 'products as product_count'])

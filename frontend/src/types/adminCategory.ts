@@ -46,3 +46,5 @@ export interface AdminCategoryMutation extends Omit<AdminCategory, 'children'> {
 }
 
 export type AdminCategoryMutationResponse = ApiMessageResponse<AdminCategoryMutation>
+
+export interface UpdateAdminCategoryStatusPayload { status: AdminCategoryStatus }

@@ -147,7 +147,8 @@ class OrderApiTest extends TestCase
     public function test_detail_keeps_snapshots_after_products_variants_and_address_book_change(): void
     {
         $user = User::factory()->create();
-        $category = Category::query()->create(['name' => '測試分類', 'status' => 'active']);
+        $root = Category::query()->create(['name' => '測試主分類', 'status' => 'active']);
+        $category = Category::query()->create(['parent_id' => $root->id, 'name' => '測試分類', 'status' => 'active']);
         $product = Product::factory()->create(['category_id' => $category->id, 'name' => '現售商品', 'price' => '600.00']);
         $variant = ProductVariant::query()->create(['product_id' => $product->id,
             'option_name' => '重量', 'option_value' => '10kg', 'stock' => 5, 'status' => 'active']);
@@ -194,7 +195,8 @@ class OrderApiTest extends TestCase
     {
         config(['services.mock_credit_card.should_fail' => false]);
         $district = City::query()->create(['name' => '臺北市'])->districts()->create(['name' => '中正區', 'postal_code' => '100']);
-        $category = Category::query()->create(['name' => '測試分類', 'status' => 'active']);
+        $root = Category::query()->create(['name' => '測試主分類', 'status' => 'active']);
+        $category = Category::query()->create(['parent_id' => $root->id, 'name' => '測試分類', 'status' => 'active']);
         foreach (['cod', 'mock_credit_card'] as $method) {
             Auth::forgetGuards();
             $user = User::factory()->create();

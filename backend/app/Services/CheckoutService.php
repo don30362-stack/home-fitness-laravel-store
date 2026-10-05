@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Category;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\District;
@@ -137,6 +138,16 @@ class CheckoutService
             throw ValidationException::withMessages([
                 'cart' => "商品「{$product->name}」需要重新選擇規格。",
             ]);
+        }
+
+        // Keep Product first, then child, parent, and finally Variant in prepareOrderItems.
+        // Locking reads must recheck the current hierarchy/status, never the cart's cached display.
+        $child = Category::query()->whereKey($product->category_id)->lockForUpdate()->first();
+        $parent = $child?->parent_id !== null
+            ? Category::query()->whereKey($child->parent_id)->lockForUpdate()->first()
+            : null;
+        if (! Product::categoryIsEffective($child, $parent)) {
+            throw ValidationException::withMessages(['cart' => '商品分類目前無法購買']);
         }
 
         return $product;

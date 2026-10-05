@@ -66,14 +66,14 @@ class CartController extends Controller
         $cartItem = $this->findUserCartItem($request, $id);
 
         $cartItem->load([
-            'product',
+            'product.category.parent',
             'productVariant',
         ]);
 
         $product = $cartItem->product;
         $variant = $cartItem->productVariant;
 
-        if ($product->status !== 'active') {
+        if ($product->status !== 'active' || ! $product->hasEffectiveCategory()) {
             throw ValidationException::withMessages([
                 'quantity' => '此商品目前無法購買。',
             ]);
@@ -179,7 +179,7 @@ class CartController extends Controller
         int $quantity,
         bool $useHigherQuantity = false
     ): void {
-        if ($product->status !== 'active') {
+        if ($product->status !== 'active' || ! $product->hasEffectiveCategory()) {
             throw ValidationException::withMessages([
                 'product_id' => '此商品目前無法購買。',
             ]);
@@ -261,6 +261,7 @@ class CartController extends Controller
     {
         return $cart->load([
             'items.product.images',
+            'items.product.category.parent',
             'items.productVariant',
         ]);
     }

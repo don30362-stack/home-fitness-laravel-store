@@ -34,13 +34,14 @@ class ProductController extends Controller
 
         $products = Product::query()
             ->with(['category', 'images'])
-            ->where('status', 'active');
+            ->sellable();
 
         if ($request->filled('category_id')) {
             $category = Category::query()
                 ->whereKey($request->integer('category_id'))
                 ->whereNotNull('parent_id')
                 ->where('status', 'active')
+                ->whereHas('parent', fn ($parent) => $parent->whereNull('parent_id')->where('status', 'active'))
                 ->first();
 
             if (!$category) {
@@ -104,7 +105,7 @@ class ProductController extends Controller
     public function show($id)
     {
         $product = Product::with(['category', 'images', 'specifications', 'variants',])
-            ->where('status', 'active')
+            ->sellable()
             ->find($id);
 
         if (!$product) {
@@ -119,7 +120,7 @@ class ProductController extends Controller
     public function related($id)
     {
         $product = Product::query()
-            ->where('status', 'active')
+            ->sellable()
             ->find($id);
 
         if (!$product) {
@@ -130,7 +131,7 @@ class ProductController extends Controller
 
         $relatedProducts = Product::query()
             ->with(['category', 'images'])
-            ->where('status', 'active')
+            ->sellable()
             ->where('category_id', $product->category_id)
             ->where('id', '!=', $product->id)
             ->limit(4)

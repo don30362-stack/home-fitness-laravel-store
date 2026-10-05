@@ -793,7 +793,9 @@ class CartApiTest extends TestCase
     private function createProduct(
         array $attributes = []
     ): Product {
+        $root = Category::query()->create(['name' => '測試主分類', 'status' => 'active']);
         $category = Category::query()->create([
+            'parent_id' => $root->id,
             'name' => '測試分類',
             'status' => 'active',
             'sort_order' => 0,

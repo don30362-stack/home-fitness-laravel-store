@@ -15,12 +15,21 @@ const views = {
   'virtual:order-list': '/src/views/MemberOrderListView.vue',
   'virtual:order-pagination': '/src/components/common/AppPagination.vue',
   'virtual:order-detail': '/src/views/MemberOrderDetailView.vue',
+  'virtual:product-category-nav': '/src/components/product/ProductCategoryNav.vue',
+  'virtual:product-card': '/src/components/product/ProductCard.vue',
+  'virtual:product-gallery': '/src/components/product/ProductGallery.vue',
+  'virtual:public-detail': '/src/views/ProductDetailView.vue',
+  'virtual:public-list': '/src/views/ProductListView.vue',
+  'virtual:cart': '/src/views/CartView.vue',
   'virtual:checkout': '/src/views/CheckoutView.vue',
 }
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', plugins: [{
   name: 'order-list-test-sfc', enforce: 'pre',
   resolveId(id) {
     if (id in views) return '\0' + id + '.ts'
+    if (id.endsWith('/ProductCategoryNav.vue')) return '\0virtual:product-category-nav.ts'
+    if (id.endsWith('/ProductCard.vue')) return '\0virtual:product-card.ts'
+    if (id.endsWith('/ProductGallery.vue')) return '\0virtual:product-gallery.ts'
     if (id.endsWith('/AppPagination.vue')) return '\0virtual:order-pagination.ts'
   },
   async load(id) {
@@ -34,6 +43,9 @@ const server = await createServer({ server: { middlewareMode: true }, appType: '
 const { default: api } = await server.ssrLoadModule('/src/services/api.ts')
 const { default: List } = await server.ssrLoadModule('virtual:order-list')
 const { default: Detail } = await server.ssrLoadModule('virtual:order-detail')
+const { default: PublicDetail } = await server.ssrLoadModule('virtual:public-detail')
+const { default: PublicList } = await server.ssrLoadModule('virtual:public-list')
+const { default: Cart } = await server.ssrLoadModule('virtual:cart')
 const { default: Checkout } = await server.ssrLoadModule('virtual:checkout')
 const { useAuthStore } = await server.ssrLoadModule('/src/stores/auth.ts')
 const { useCartStore } = await server.ssrLoadModule('/src/stores/cart.ts')
@@ -83,9 +95,9 @@ const mount = async (url = '/member/orders', initialize = () => {}) => {
     { path: '/member/orders', name: 'member-orders', component: List },
     { path: '/member/orders/:id', name: 'member-order-detail', component: Detail },
     { path: '/checkout', name: 'checkout', component: Checkout },
-    { path: '/cart', name: 'cart', component: { template: '<div />' } },
-    { path: '/products', name: 'products', component: { template: '<div />' } },
-    { path: '/products/:id', name: 'product-detail', component: { template: '<div />' } },
+    { path: '/cart', name: 'cart', component: Cart },
+    { path: '/products', name: 'products', component: PublicList },
+    { path: '/products/:id', name: 'product-detail', component: PublicDetail },
     { path: '/', name: 'home', component: { template: '<div />' } },
   ] })
   await router.push(url); await router.isReady()
@@ -490,4 +502,31 @@ test('422 回查失敗使用詳細載入錯誤；手動重試只 GET，不重送
   assert.ok(text(view.root).includes('已完成')); assert.ok(!button(view.root, '取消訂單'))
   assert.equal(posts, 1); assert.equal(gets, 3)
   view.app.unmount()
+})
+
+
+test('C07 Cart renders backend classification reason, blocks checkout, and a fresh GET restores availability', async () => {
+  let restored=false, cart
+  const item={id:1,product_id:1,product_variant_id:null,quantity:2,unit_price:'100.00',subtotal:'200.00',available_stock:10,variant:null,
+    product:{id:1,product_code:'PRD-TEST',name:'C07商品',price:'100.00',status:'active',primary_image:null}}
+  api.defaults.adapter=config=>Promise.resolve(reply(config,{data:{id:1,items:[{...item,is_available:restored,unavailable_reason:restored?null:'商品分類目前無法購買'}],item_count:2,subtotal:'200.00',has_unavailable_items:!restored}}))
+  const view=await mount('/cart',pinia=>{const auth=useAuthStore(pinia);auth.currentUser={id:1,name:'測試',email:'test@example.test',status:'active'};cart=useCartStore(pinia)})
+  await cart.fetchMemberCart();await settle()
+  assert.ok(text(view.root).includes('商品分類目前無法購買'));assert.ok(text(view.root).includes('暫時無法結帳'))
+  assert.equal(find(view.root,el=>el.type==='a'&&text(el).trim()==='前往結帳'),undefined)
+  restored=true;await cart.fetchMemberCart();await settle()
+  assert.ok(!text(view.root).includes('商品分類目前無法購買'));assert.ok(find(view.root,el=>el.type==='a'&&text(el).trim()==='前往結帳'))
+  view.app.unmount()
+})
+
+
+test('C07 Product detail backend 404 keeps existing unavailable-product UX and no purchase button',async()=>{
+ api.defaults.adapter=config=>Promise.reject(new axios.AxiosError('not found','ERR_BAD_RESPONSE',config,undefined,{...reply(config,{message:'商品不存在'}),status:404}))
+ const view=await mount('/products/1');await settle()
+ assert.ok(text(view.root).includes('商品不存在'));assert.equal(find(view.root,el=>el.type==='button'&&text(el).includes('加入購物車')),undefined);view.app.unmount()
+})
+test('C07 Product list server-side empty result preserves category query and empty UX',async()=>{
+ const calls=[];api.defaults.adapter=config=>{calls.push(config);return Promise.resolve(reply(config,{data:[],links:{first:'',last:'',prev:null,next:null},meta:{current_page:1,last_page:1,per_page:8,total:0}}))}
+ const view=await mount('/products?category_id=2');await settle()
+ assert.equal(view.router.currentRoute.value.query.category_id,'2');assert.ok(text(view.root).includes('找不到符合條件的商品。'));assert.ok(calls.some(c=>c.url==='/products'&&String(c.params.category_id)==='2'));view.app.unmount()
 })

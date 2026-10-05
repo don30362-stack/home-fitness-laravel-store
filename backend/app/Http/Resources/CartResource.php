@@ -36,30 +36,9 @@ class CartResource extends JsonResource
 
             'has_unavailable_items' => $items->contains(
                 fn(CartItem $item) =>
-                ! $this->isItemAvailable($item)
+                \App\Support\CartAvailability::reason($item) !== null
             ),
         ];
     }
 
-    private function isItemAvailable(CartItem $item): bool
-    {
-        if ($item->product->status !== 'active') {
-            return false;
-        }
-
-        if ($item->product_variant_id !== null) {
-            if (
-                $item->productVariant === null
-                || $item->productVariant->status !== 'active'
-            ) {
-                return false;
-            }
-
-            return (int) $item->productVariant->stock
-                >= $item->quantity;
-        }
-
-        return (int) ($item->product->stock ?? 0)
-            >= $item->quantity;
-    }
 }

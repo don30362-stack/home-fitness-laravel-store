@@ -1337,6 +1337,13 @@ for (const method of ['post', 'patch']) for (const outcome of ['success', 'failu
     }
     collect(view.root)
     assert.equal(controls.length, 7, '含所有root/child edit controls')
+    for (const label of ['啟用主分類','停用主分類','啟用子分類','停用子分類']) {
+      const control = button(view,label)
+      assert.equal(control.props.disabled,true)
+      control.props.onClick(); await settle()
+      assert.equal(find(view.root,el=>el.type==='form'),originalForm)
+      assert.equal(find(view.root,el=>el.props['aria-label']==='確認分類狀態'),undefined)
+    }
     for (const control of controls) {
       assert.equal(control.props.disabled, true)
       // 直接呼叫handler，另外驗證程式防線，不只依賴瀏覽器disabled。
@@ -1393,4 +1400,42 @@ test('Category表單blank/negative sort/未選parent拒絕，放棄不送mutatio
   for (const reason of ['請輸入分類名稱', '非負整數', '請選擇主分類']) assert.ok(text(view.root).includes(reason))
   assert.equal(mutations().length, 0); await click(view, '放棄'); assert.equal(find(view.root, el => el.type === 'form'), undefined)
   assertCategoryMutationBoundary(); view.app.unmount()
+})
+
+for (const [label, id, desired] of [['啟用主分類',1,'active'], ['停用主分類',4,'inactive'], ['停用子分類',2,'inactive'], ['啟用子分類',3,'active']]) {
+  test(`Category status ${label}: confirmation/status-only payload/no optimistic/authoritative GET`, async () => {
+    let finish, completed=false
+    api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:completed?[{...adminCategoryTree[0],name:'status權威樹'},adminCategoryTree[1]]:adminCategoryTree}));return new Promise(resolve=>{finish=()=>{completed=true;resolve(response(c,{data:categoryMutationRow({id,status:desired}),message:'狀態已更新'}))}})}
+    const view=await categoriesView();await click(view,label)
+    const message=text(view.root)
+    assert.ok(message.includes(desired==='inactive'?'商品暫時不可公開／不可購買':'商品是否可販售仍依主分類'))
+    assert.equal(mutations().length,0)
+    await click(view,'確認變更狀態')
+    const collect=el=>{if(el.type==='button'&&['新增主分類','新增子分類','編輯主分類','編輯子分類','啟用主分類','停用主分類','啟用子分類','停用子分類','確認變更狀態','取消狀態變更'].includes(text(el).trim())){assert.equal(el.props.disabled,true);el.props.onClick()}el.children.forEach(collect)}
+    collect(view.root);await settle()
+    assert.equal(find(view.root,el=>el.type==='form'),undefined)
+    assert.equal(mutations().length,1)
+    assert.equal(mutations()[0].url,`/admin/categories/${id}/status`)
+    assert.deepEqual(JSON.parse(mutations()[0].data),{status:desired})
+    assert.ok(!text(view.root).includes('status權威樹'))
+    finish();await settle();await settle()
+    assert.ok(text(view.root).includes('status權威樹'));assert.ok(text(view.root).includes('狀態已更新'))
+    assert.equal(calls.filter(c=>c.method==='get').length,2);assert.equal(button(view,'新增主分類').props.disabled,false)
+    assertMemberUntouched();view.app.unmount()
+  })
+}
+for(const [status,code] of [[422],[403],[419],[undefined],[500],[401],[403,'ADMIN_ACCOUNT_DISABLED']]) {
+ test(`Category status failure ${status}/${code??''}: no retry/old tree/member isolation`,async()=>{
+  api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:adminCategoryTree}));const e=failure(c,status,code);if(status===422)e.response.data.errors={status:['分類拒絕原因']};return Promise.reject(e)}
+  const view=await categoriesView();await click(view,'停用子分類');await click(view,'確認變更狀態');await settle()
+  assert.equal(mutations().length,1);assert.equal(mutations()[0].method,'patch');assertMemberUntouched()
+  if(status===401||code){assert.equal(auth.currentAdmin,null);assert.equal(view.router.currentRoute.value.name,'admin-login')}
+  else {assert.ok(auth.currentAdmin);assert.ok(text(view.root).includes(status===422?'分類拒絕原因':status?'後端停用原因':'分類狀態更新失敗'));assert.ok(text(view.root).includes('啟用子分類'));assert.equal(button(view,'確認變更狀態').props.disabled,false);assert.equal(calls.filter(c=>c.method==='get').length,1)}
+  view.app.unmount()
+ })
+}
+test('Category status route leave keeps stale protection and never refreshes another module',async()=>{
+ let finish;api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:adminCategoryTree}));return new Promise(resolve=>{finish=()=>resolve(response(c,{data:categoryMutationRow(),message:'late status success'}))})}
+ const view=await categoriesView();await click(view,'啟用主分類');await click(view,'確認變更狀態');await view.router.push('/admin/orders');await settle();finish();await settle()
+ assert.equal(view.router.currentRoute.value.path,'/admin/orders');assert.ok(!text(view.root).includes('late status success'));assert.equal(calls.filter(c=>c.method==='get').length,1);assertMemberUntouched();view.app.unmount()
 })

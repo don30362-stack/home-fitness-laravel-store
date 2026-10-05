@@ -23,6 +23,25 @@ class Product extends Model
         'status',
     ];
 
+    public function scopeSellable(\Illuminate\Database\Eloquent\Builder $query): void
+    {
+        $query->where('products.status', 'active')->whereHas('category', fn ($child) => $child
+            ->where('status', 'active')->whereNotNull('parent_id')
+            ->whereHas('parent', fn ($parent) => $parent->whereNull('parent_id')->where('status', 'active')));
+    }
+
+    public function hasEffectiveCategory(): bool
+    {
+        return self::categoryIsEffective($this->category, $this->category?->parent);
+    }
+
+    public static function categoryIsEffective(?Category $child, ?Category $parent): bool
+    {
+        return $child !== null && $parent !== null
+            && $child->parent_id !== null && (int) $child->parent_id === (int) $parent->id
+            && $parent->parent_id === null && $child->status === 'active' && $parent->status === 'active';
+    }
+
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);

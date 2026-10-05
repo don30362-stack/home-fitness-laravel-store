@@ -329,7 +329,8 @@ class OrderCancellationApiTest extends TestCase
 
     private function product(array $attributes = []): Product
     {
-        $category = Category::query()->firstOrCreate(['name' => '取消測試分類'], ['status' => 'active']);
+        $root = Category::query()->firstOrCreate(['name' => '取消測試主分類'], ['status' => 'active']);
+        $category = Category::query()->firstOrCreate(['parent_id' => $root->id, 'name' => '取消測試分類'], ['status' => 'active']);
         return Product::factory()->create(array_merge(['category_id' => $category->id, 'stock' => 5], $attributes));
     }
 

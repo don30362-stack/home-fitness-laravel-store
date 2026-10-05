@@ -22,9 +22,7 @@ class CartItemResource extends JsonResource
             ? (int) ($this->productVariant?->stock ?? 0)
             : (int) ($this->product->stock ?? 0);
 
-        $unavailableReason = $this->getUnavailableReason(
-            $availableStock
-        );
+        $unavailableReason = \App\Support\CartAvailability::reason($this->resource);
 
         return [
             'id' => $this->id,
@@ -60,27 +58,4 @@ class CartItemResource extends JsonResource
         ];
     }
 
-    private function getUnavailableReason(
-        int $availableStock
-    ): ?string {
-        if ($this->product->status !== 'active') {
-            return '商品已下架';
-        }
-
-        if ($this->product_variant_id !== null) {
-            if ($this->productVariant === null) {
-                return '商品規格不存在';
-            }
-
-            if ($this->productVariant->status !== 'active') {
-                return '商品規格已停用';
-            }
-        }
-
-        if ($availableStock < $this->quantity) {
-            return '商品庫存不足';
-        }
-
-        return null;
-    }
 }
