@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\Category;
+use App\Support\CategoryReferenceError;
+use Illuminate\Database\QueryException;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -50,6 +52,8 @@ class AdminProductService
                     throw $exception;
                 }
                 // 整個失敗transaction已rollback，重新產碼並重做aggregate。
+            } catch (QueryException $exception) {
+                CategoryReferenceError::rethrow($exception, 'products_category_id_foreign', 'category_id', '商品分類已不存在，請重新選擇。');
             }
         }
 
@@ -58,64 +62,68 @@ class AdminProductService
 
     public function update(int $id, array $data): Product
     {
-        return DB::transaction(function () use ($id, $data) {
-            $product = Product::query()->lockForUpdate()->findOrFail($id);
-            $existing = $product->variants()->orderBy('id')->lockForUpdate()->get()->keyBy('id');
-            if (array_key_exists('category_id', $data)) {
-                $this->validateCategory((int) $data['category_id'], (int) $product->category_id);
-            }
-            $product->fill(Arr::only($data, self::BASIC_FIELDS));
-            if (! $product->saveOrFail()) {
-                throw new RuntimeException('無法更新商品。');
-            }
-            $this->syncSpecifications($product, $data);
+        try {
+            return DB::transaction(function () use ($id, $data) {
+                $product = Product::query()->lockForUpdate()->findOrFail($id);
+                $existing = $product->variants()->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+                if (array_key_exists('category_id', $data)) {
+                    $this->validateCategory((int) $data['category_id'], (int) $product->category_id);
+                }
+                $product->fill(Arr::only($data, self::BASIC_FIELDS));
+                if (! $product->saveOrFail()) {
+                    throw new RuntimeException('無法更新商品。');
+                }
+                $this->syncSpecifications($product, $data);
 
-            if (array_key_exists('variants', $data)) {
-                $rows = $data['variants'];
-                if ($existing->isEmpty() && $rows !== []) {
-                    $this->reject('variants', '商品建立後不可由無規格轉為有規格。');
-                }
-                if ($existing->isNotEmpty() && $rows === []) {
-                    $this->reject('variants', '有購買規格商品至少保留一個規格，不可轉換庫存模式。');
-                }
-                $this->validateAxis($rows);
-                $kept = [];
-                foreach ($rows as $index => $row) {
-                    if (array_key_exists('id', $row)) {
-                        $variant = $existing->get((int) $row['id']);
-                        if (! $variant || in_array($variant->id, $kept, true)) {
-                            $this->reject("variants.$index.id", '規格必須是此商品自己的既有規格，且不可重複。');
-                        }
-                        if (array_key_exists('stock', $row)) {
-                            $this->reject("variants.$index.stock", '既有規格庫存請由庫存管理調整。');
-                        }
-                        if (($variant->option_name !== $row['option_name'] || $variant->option_value !== $row['option_value'])
-                            && $this->isReferenced($variant)) {
-                            $this->reject("variants.$index.option_value", '已被購物車或訂單使用的規格不可變更選項身分；請新增規格並將舊規格設為 inactive。');
-                        }
-                        $variant->fill(Arr::only($row, ['option_name', 'option_value', 'status']));
-                        if (! $variant->saveOrFail()) {
-                            throw new RuntimeException('無法更新商品規格。');
-                        }
-                        $kept[] = $variant->id;
-                    } else {
-                        $product->variants()->create(Arr::only($row, ['option_name', 'option_value', 'stock', 'status']));
+                if (array_key_exists('variants', $data)) {
+                    $rows = $data['variants'];
+                    if ($existing->isEmpty() && $rows !== []) {
+                        $this->reject('variants', '商品建立後不可由無規格轉為有規格。');
                     }
-                }
-                foreach ($existing as $variant) {
-                    if (! in_array($variant->id, $kept, true)) {
-                        if ($this->isReferenced($variant)) {
-                            $this->reject('variants', '已被會員購物車或歷史訂單使用的規格不可刪除，請改為 inactive。');
-                        }
-                        if (! $variant->delete()) {
-                            throw new RuntimeException('無法刪除商品規格。');
+                    if ($existing->isNotEmpty() && $rows === []) {
+                        $this->reject('variants', '有購買規格商品至少保留一個規格，不可轉換庫存模式。');
+                    }
+                    $this->validateAxis($rows);
+                    $kept = [];
+                    foreach ($rows as $index => $row) {
+                        if (array_key_exists('id', $row)) {
+                            $variant = $existing->get((int) $row['id']);
+                            if (! $variant || in_array($variant->id, $kept, true)) {
+                                $this->reject("variants.$index.id", '規格必須是此商品自己的既有規格，且不可重複。');
+                            }
+                            if (array_key_exists('stock', $row)) {
+                                $this->reject("variants.$index.stock", '既有規格庫存請由庫存管理調整。');
+                            }
+                            if (($variant->option_name !== $row['option_name'] || $variant->option_value !== $row['option_value'])
+                                && $this->isReferenced($variant)) {
+                                $this->reject("variants.$index.option_value", '已被購物車或訂單使用的規格不可變更選項身分；請新增規格並將舊規格設為 inactive。');
+                            }
+                            $variant->fill(Arr::only($row, ['option_name', 'option_value', 'status']));
+                            if (! $variant->saveOrFail()) {
+                                throw new RuntimeException('無法更新商品規格。');
+                            }
+                            $kept[] = $variant->id;
+                        } else {
+                            $product->variants()->create(Arr::only($row, ['option_name', 'option_value', 'stock', 'status']));
                         }
                     }
+                    foreach ($existing as $variant) {
+                        if (! in_array($variant->id, $kept, true)) {
+                            if ($this->isReferenced($variant)) {
+                                $this->reject('variants', '已被會員購物車或歷史訂單使用的規格不可刪除，請改為 inactive。');
+                            }
+                            if (! $variant->delete()) {
+                                throw new RuntimeException('無法刪除商品規格。');
+                            }
+                        }
+                    }
                 }
-            }
 
-            return $product;
-        }, 3);
+                return $product;
+            }, 3);
+        } catch (QueryException $exception) {
+            CategoryReferenceError::rethrow($exception, 'products_category_id_foreign', 'category_id', '商品分類已不存在，請重新選擇。');
+        }
     }
 
     public function changeStatus(int $id, string $status): Product

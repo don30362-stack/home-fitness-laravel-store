@@ -36,6 +36,12 @@ class AdminCategoryController extends Controller
         return (new AdminCategoryMutationResource($category))->additional(['message' => '分類狀態更新成功。']);
     }
 
+    public function destroy(int $id, AdminCategoryService $service): JsonResponse
+    {
+        $service->delete($id);
+        return response()->json(['message' => '分類已刪除。']);
+    }
+
     public function index(): AnonymousResourceCollection
     {
         $categories = Category::query()

@@ -1203,7 +1203,7 @@ const assertCategoryMutationBoundary = () => {
   assertMemberUntouched()
 }
 
-test('Category mutation service POST/PATCH data/message，無status API或DELETE', async () => {
+test('Category create/update service only uses POST/PATCH data/message', async () => {
   api.defaults.adapter = categoryMutationAdapter(c => response(c,
     { data: categoryMutationRow(JSON.parse(c.data)), message: 'backend success' }, c.method === 'post' ? 201 : 200))
   const created = await categoryService.createAdminCategory({ name: 'root', status: 'inactive' })
@@ -1337,7 +1337,7 @@ for (const method of ['post', 'patch']) for (const outcome of ['success', 'failu
     }
     collect(view.root)
     assert.equal(controls.length, 7, '含所有root/child edit controls')
-    for (const label of ['啟用主分類','停用主分類','啟用子分類','停用子分類']) {
+    for (const label of ['啟用主分類','停用主分類','啟用子分類','停用子分類','刪除主分類','刪除子分類']) {
       const control = button(view,label)
       assert.equal(control.props.disabled,true)
       control.props.onClick(); await settle()
@@ -1411,7 +1411,7 @@ for (const [label, id, desired] of [['啟用主分類',1,'active'], ['停用主�
     assert.ok(message.includes(desired==='inactive'?'商品暫時不可公開／不可購買':'商品是否可販售仍依主分類'))
     assert.equal(mutations().length,0)
     await click(view,'確認變更狀態')
-    const collect=el=>{if(el.type==='button'&&['新增主分類','新增子分類','編輯主分類','編輯子分類','啟用主分類','停用主分類','啟用子分類','停用子分類','確認變更狀態','取消狀態變更'].includes(text(el).trim())){assert.equal(el.props.disabled,true);el.props.onClick()}el.children.forEach(collect)}
+    const collect=el=>{if(el.type==='button'&&['新增主分類','新增子分類','編輯主分類','編輯子分類','啟用主分類','停用主分類','啟用子分類','停用子分類','確認變更狀態','取消狀態變更','刪除主分類','刪除子分類'].includes(text(el).trim())){assert.equal(el.props.disabled,true);el.props.onClick()}el.children.forEach(collect)}
     collect(view.root);await settle()
     assert.equal(find(view.root,el=>el.type==='form'),undefined)
     assert.equal(mutations().length,1)
@@ -1438,4 +1438,66 @@ test('Category status route leave keeps stale protection and never refreshes ano
  let finish;api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:adminCategoryTree}));return new Promise(resolve=>{finish=()=>resolve(response(c,{data:categoryMutationRow(),message:'late status success'}))})}
  const view=await categoriesView();await click(view,'啟用主分類');await click(view,'確認變更狀態');await view.router.push('/admin/orders');await settle();finish();await settle()
  assert.equal(view.router.currentRoute.value.path,'/admin/orders');assert.ok(!text(view.root).includes('late status success'));assert.equal(calls.filter(c=>c.method==='get').length,1);assertMemberUntouched();view.app.unmount()
+})
+
+const assertCategoryDeleteBoundary = () => {
+  assert.ok(calls.every(c => c.method === 'get' ? c.url === '/admin/categories' : c.method === 'delete' && /^\/admin\/categories\/\d+$/.test(c.url)))
+  assertMemberUntouched()
+}
+for (const [role, label, name, id] of [['root','刪除主分類','管理根分類',1], ['child','刪除子分類','啟用子分類',2]]) {
+  test(`Category DELETE ${role}: confirmation name/type/warning; cancel sends nothing`, async () => {
+    const view=await categoriesView();await click(view,label)
+    const dialog=find(view.root,el=>el.props['aria-label']==='確認刪除分類')
+    assert.ok(text(dialog).includes(role==='root'?'主分類':'子分類'));assert.ok(text(dialog).includes(name))
+    assert.ok(text(dialog).includes('永久刪除此分類，無法復原'));assert.ok(text(dialog).includes('若分類仍有子分類或商品，後端會拒絕刪除'))
+    assert.equal(mutations().length,0);await click(view,'取消刪除')
+    assert.equal(find(view.root,el=>el.props['aria-label']==='確認刪除分類'),undefined)
+    assert.equal(mutations().length,0);assertCategoryDeleteBoundary();view.app.unmount()
+  })
+  test(`Category DELETE ${role}: pending mutex/no optimistic/no payload/authority GET`,async()=>{
+    let finish,completed=false
+    api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:completed?[{...adminCategoryTree[0],name:'刪除後權威樹'},adminCategoryTree[1]]:adminCategoryTree}));return new Promise(resolve=>{finish=()=>{completed=true;resolve(response(c,{message:'後端刪除成功'}))}})}
+    const view=await categoriesView();await click(view,label);await click(view,'確認刪除分類')
+    assert.equal(mutations().length,1);assert.equal(mutations()[0].url,`/admin/categories/${id}`);assert.equal(mutations()[0].data,undefined)
+    assert.ok(text(view.root).includes(name));assert.ok(!text(view.root).includes('刪除後權威樹'))
+    const blocked=['新增主分類','新增子分類','編輯主分類','編輯子分類','啟用主分類','停用主分類','啟用子分類','停用子分類','刪除主分類','刪除子分類','確認刪除分類','取消刪除']
+    const collect=el=>{if(el.type==='button'&&blocked.includes(text(el).trim())){assert.equal(el.props.disabled,true);el.props.onClick()}el.children.forEach(collect)}
+    collect(view.root);await settle()
+    assert.equal(mutations().length,1);assert.equal(find(view.root,el=>el.type==='form'),undefined);assert.equal(find(view.root,el=>el.props['aria-label']==='確認分類狀態'),undefined)
+    finish();await settle();await settle()
+    assert.equal(find(view.root,el=>el.props['aria-label']==='確認刪除分類'),undefined)
+    assert.ok(text(view.root).includes('後端刪除成功'));assert.ok(text(view.root).includes('刪除後權威樹'))
+    assert.equal(calls.filter(c=>c.method==='get').length,2);assert.equal(button(view,'新增主分類').props.disabled,false)
+    assertCategoryDeleteBoundary();view.app.unmount()
+  })
+}
+for(const reason of ['此分類仍有子分類，無法刪除。','此分類仍有商品使用，無法刪除。']) {
+ test(`Category DELETE 422 business reason: ${reason}`,async()=>{
+  api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:adminCategoryTree}));const e=failure(c,422);e.response.data.errors={category:[reason]};return Promise.reject(e)}
+  const view=await categoriesView();await click(view,'刪除主分類');await click(view,'確認刪除分類');await settle()
+  assert.ok(text(view.root).includes(reason));assert.ok(text(view.root).includes('管理根分類'));assert.ok(text(view.root).includes('啟用子分類'))
+  assert.equal(button(view,'確認刪除分類').props.disabled,false);assert.equal(button(view,'新增主分類').props.disabled,false)
+  assert.equal(mutations().length,1);assert.equal(calls.filter(c=>c.method==='get').length,1);assertCategoryDeleteBoundary();view.app.unmount()
+ })
+}
+for(const [status,code] of [[403],[419],[undefined],[500],[401],[403,'ADMIN_ACCOUNT_DISABLED']]) {
+ test(`Category DELETE error ${status}/${code??''}: member isolation/no auto retry`,async()=>{
+  api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:adminCategoryTree}));return Promise.reject(failure(c,status,code))}
+  const view=await categoriesView();await click(view,'刪除子分類');await click(view,'確認刪除分類');await settle()
+  assert.equal(mutations().length,1);assertCategoryDeleteBoundary()
+  if(status===401||code){assert.equal(auth.currentAdmin,null);assert.equal(view.router.currentRoute.value.name,'admin-login')}
+  else {assert.ok(auth.currentAdmin);assert.ok(text(view.root).includes(status?'後端停用原因':'分類刪除失敗'));assert.ok(text(view.root).includes('啟用子分類'));assert.equal(button(view,'確認刪除分類').props.disabled,false);assert.equal(button(view,'刪除子分類').props.disabled,false);assert.equal(calls.filter(c=>c.method==='get').length,1)}
+  view.app.unmount()
+ })
+}
+for(const outcome of ['success','failure']) {
+ test(`Category DELETE route leave late ${outcome}: no navigation/message/GET contamination`,async()=>{
+  let finish;api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:adminCategoryTree}));return new Promise((resolve,reject)=>{finish=()=>outcome==='success'?resolve(response(c,{message:'late delete success'})):reject(failure(c,500))})}
+  const view=await categoriesView();await click(view,'刪除主分類');await click(view,'確認刪除分類');await view.router.push('/admin/orders');await settle();finish();await settle()
+  assert.equal(view.router.currentRoute.value.path,'/admin/orders');assert.ok(!text(view.root).includes('late delete success'));assert.ok(!text(view.root).includes('後端停用原因'));assert.equal(calls.filter(c=>c.method==='get').length,1);assertCategoryDeleteBoundary();view.app.unmount()
+ })
+}
+test('Category DELETE service reuses message-only type and adminApi without body',async()=>{
+ api.defaults.adapter=c=>{calls.push(c);return Promise.resolve(response(c,{message:'刪除回應'}))}
+ const result=await categoryService.deleteAdminCategory(7);assert.deepEqual(result,{message:'刪除回應'});assert.equal(calls[0].method,'delete');assert.equal(calls[0].url,'/admin/categories/7');assert.equal(calls[0].data,undefined);assertCategoryDeleteBoundary()
 })

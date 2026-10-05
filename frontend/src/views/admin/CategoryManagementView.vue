@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import axios from 'axios'
-import { getAdminCategories, updateAdminCategoryStatus } from '@/services/adminCategoryService'
+import { getAdminCategories, updateAdminCategoryStatus, deleteAdminCategory } from '@/services/adminCategoryService'
 import type { AdminCategory, AdminCategoryChild, AdminCategoryMutationResponse } from '@/types/adminCategory'
 import type { ApiErrorResponse } from '@/types/api'
 import CategoryForm from '@/components/admin/CategoryForm.vue'
@@ -14,16 +14,49 @@ const form = ref<{ category: AdminCategory | AdminCategoryChild | null; role: 'r
 const formContext = ref(0)
 const formSubmitting = ref(false)
 const statusSubmitting = ref(false)
-const mutationPending = computed(() => formSubmitting.value || statusSubmitting.value)
+const deleteSubmitting = ref(false)
+const deleteTarget = ref<{ id: number; name: string; role: 'root' | 'child' } | null>(null)
+const deleteError = ref('')
+const mutationPending = computed(() => formSubmitting.value || statusSubmitting.value || deleteSubmitting.value)
 const statusTarget = ref<{ id: number; name: string; status: 'active' | 'inactive'; role: 'root' | 'child' } | null>(null)
 const statusError = ref('')
 let disposed = false
 const openStatus = (category: AdminCategory | AdminCategoryChild, role: 'root' | 'child') => {
   if (mutationPending.value) return
   closeForm()
+  deleteTarget.value = null
   success.value = ''
   statusError.value = ''
   statusTarget.value = { id: category.id, name: category.name, status: category.status === 'active' ? 'inactive' : 'active', role }
+}
+const openDelete = (category: AdminCategory | AdminCategoryChild, role: 'root' | 'child') => {
+  if (mutationPending.value) return
+  closeForm()
+  statusTarget.value = null
+  success.value = ''
+  deleteError.value = ''
+  deleteTarget.value = { id: category.id, name: category.name, role }
+}
+const cancelDelete = () => { if (!mutationPending.value) deleteTarget.value = null }
+const submitDelete = async () => {
+  if (mutationPending.value || !deleteTarget.value) return
+  const target = { ...deleteTarget.value }
+  deleteSubmitting.value = true
+  deleteError.value = ''
+  try {
+    const response = await deleteAdminCategory(target.id)
+    if (disposed) return
+    success.value = response.message
+    deleteTarget.value = null
+    await loadCategories()
+  } catch (failure: unknown) {
+    if (disposed) return
+    deleteError.value = axios.isAxiosError<ApiErrorResponse>(failure)
+      ? Object.values(failure.response?.data?.errors || {}).flat().join(' ') || failure.response?.data?.message || '分類刪除失敗，請稍後重試'
+      : '分類刪除失敗，請稍後重試'
+  } finally {
+    if (!disposed) deleteSubmitting.value = false
+  }
 }
 const cancelStatus = () => { if (!mutationPending.value) statusTarget.value = null }
 const submitStatus = async () => {
@@ -69,6 +102,7 @@ const statusLabel = (status: string) => status === 'active' ? '啟用' : status 
 const openForm = (role: 'root' | 'child', category: AdminCategory | AdminCategoryChild | null = null) => {
   if (mutationPending.value) return
   statusTarget.value = null
+  deleteTarget.value = null
   formContext.value++
   success.value = ''
   form.value = { role, category }
@@ -112,6 +146,15 @@ onBeforeUnmount(() => { disposed = true; requestSequence++ })
         <button type="button" class="btn btn-outline-secondary" :disabled="mutationPending" @click="cancelStatus">取消狀態變更</button>
       </div>
     </div>
+    <div v-if="deleteTarget" class="card card-body mb-3" role="dialog" aria-label="確認刪除分類">
+      <h2 class="h5">刪除{{ deleteTarget.role === 'root' ? '主分類' : '子分類' }}：{{ deleteTarget.name }}</h2>
+      <p>此操作會永久刪除此分類，無法復原。若分類仍有子分類或商品，後端會拒絕刪除。</p>
+      <p v-if="deleteError" class="alert alert-danger" role="alert">{{ deleteError }}</p>
+      <div class="d-flex gap-2">
+        <button type="button" class="btn btn-danger" :disabled="mutationPending" @click="submitDelete">確認刪除分類</button>
+        <button type="button" class="btn btn-outline-secondary" :disabled="mutationPending" @click="cancelDelete">取消刪除</button>
+      </div>
+    </div>
     <p v-if="loading" role="status">分類載入中…</p>
     <div v-else-if="error" class="alert alert-danger" role="alert">
       <p class="mb-2">{{ error }}</p>
@@ -124,6 +167,7 @@ onBeforeUnmount(() => { disposed = true; requestSequence++ })
           <h2 class="h5 mb-2">{{ category.name }}</h2>
           <button type="button" class="btn btn-sm btn-outline-secondary mb-2" :disabled="mutationPending" @click="openForm('root', category)">編輯主分類</button>
           <button type="button" class="btn btn-sm btn-outline-warning mb-2 ms-2" :disabled="mutationPending" @click="openStatus(category, 'root')">{{ category.status === 'active' ? '停用主分類' : '啟用主分類' }}</button>
+          <button type="button" class="btn btn-sm btn-outline-danger mb-2 ms-2" :disabled="mutationPending" @click="openDelete(category, 'root')">刪除主分類</button>
           <div class="d-flex flex-wrap gap-3 small">
             <span>狀態：{{ statusLabel(category.status) }}</span>
             <span>排序：{{ category.sort_order }}</span>
@@ -135,6 +179,7 @@ onBeforeUnmount(() => { disposed = true; requestSequence++ })
             <h3 class="h6 mb-2">{{ child.name }}</h3>
             <button type="button" class="btn btn-sm btn-outline-secondary mb-2" :disabled="mutationPending" @click="openForm('child', child)">編輯子分類</button>
             <button type="button" class="btn btn-sm btn-outline-warning mb-2 ms-2" :disabled="mutationPending" @click="openStatus(child, 'child')">{{ child.status === 'active' ? '停用子分類' : '啟用子分類' }}</button>
+            <button type="button" class="btn btn-sm btn-outline-danger mb-2 ms-2" :disabled="mutationPending" @click="openDelete(child, 'child')">刪除子分類</button>
             <div class="d-flex flex-wrap gap-3 small">
               <span>狀態：{{ statusLabel(child.status) }}</span>
               <span>排序：{{ child.sort_order }}</span>

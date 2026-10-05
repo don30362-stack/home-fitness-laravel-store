@@ -263,14 +263,14 @@ class AdminCategoryMutationApiTest extends TestCase
         $this->assertDatabaseHas('categories', ['id' => $child->id, 'name' => 'before', 'parent_id' => $root->id, 'sort_order' => 0]);
     }
 
-    public function test_general_patch_still_cannot_mutate_status_and_delete_is_not_available(): void
+    public function test_general_patch_still_cannot_mutate_status_and_c07_remains_effective(): void
     {
         $this->login();
         $root = $this->category();
         $child = $this->category(['parent_id' => $root->id, 'status' => 'inactive']);
         $product = Product::factory()->create(['category_id' => $child->id, 'status' => 'active']);
         $this->patchJson('/api/admin/categories/'.$child->id, ['status' => 'active'])->assertUnprocessable();
-        $this->deleteJson('/api/admin/categories/'.$child->id)->assertStatus(405);
+        $this->deleteJson('/api/admin/categories/'.$child->id)->assertUnprocessable();
         // C07 now rejects products under inactive categories.
         $this->getJson('/api/products/'.$product->id)->assertNotFound();
     }

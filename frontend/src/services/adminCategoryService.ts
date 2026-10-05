@@ -1,4 +1,5 @@
 import adminApi from './adminApi'
+import type { ApiMessageOnlyResponse } from '@/types/api'
 import type { AdminCategoryListResponse, AdminCategoryMutationResponse, CreateAdminCategoryPayload, UpdateAdminCategoryPayload, UpdateAdminCategoryStatusPayload } from '@/types/adminCategory'
 
 export const getAdminCategories = async (): Promise<AdminCategoryListResponse> => {
@@ -16,4 +17,8 @@ export const updateAdminCategory = async (id: number, payload: UpdateAdminCatego
 
 export const updateAdminCategoryStatus = async (id: number, payload: UpdateAdminCategoryStatusPayload): Promise<AdminCategoryMutationResponse> => {
   return (await adminApi.patch<AdminCategoryMutationResponse>(`/admin/categories/${id}/status`, payload)).data
+}
+
+export const deleteAdminCategory = async (id: number): Promise<ApiMessageOnlyResponse> => {
+  return (await adminApi.delete<ApiMessageOnlyResponse>(`/admin/categories/${id}`)).data
 }

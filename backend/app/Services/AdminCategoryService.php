@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Models\Category;
+use App\Support\CategoryReferenceError;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -10,49 +12,57 @@ class AdminCategoryService
 {
     public function create(array $data): Category
     {
-        return DB::transaction(function () use ($data) {
-            $parentId = isset($data['parent_id']) ? (int) $data['parent_id'] : null;
-            if ($parentId !== null) {
-                $this->validateParent($parentId, true);
-            }
-            $this->validateName($data['name'], $parentId);
+        try {
+            return DB::transaction(function () use ($data) {
+                $parentId = isset($data['parent_id']) ? (int) $data['parent_id'] : null;
+                if ($parentId !== null) {
+                    $this->validateParent($parentId, true);
+                }
+                $this->validateName($data['name'], $parentId);
 
-            return Category::create([
-                'name' => $data['name'],
-                'parent_id' => $parentId,
-                'sort_order' => $data['sort_order'] ?? 0,
-                'status' => $data['status'] ?? 'active',
-            ]);
-        });
+                return Category::create([
+                    'name' => $data['name'],
+                    'parent_id' => $parentId,
+                    'sort_order' => $data['sort_order'] ?? 0,
+                    'status' => $data['status'] ?? 'active',
+                ]);
+            });
+        } catch (QueryException $exception) {
+            CategoryReferenceError::rethrow($exception, 'categories_parent_id_foreign', 'parent_id', '主分類已不存在，請重新選擇。');
+        }
     }
 
     public function update(int $id, array $data): Category
     {
-        return DB::transaction(function () use ($id, $data) {
-            $category = Category::query()->lockForUpdate()->findOrFail($id);
-            $currentParent = $category->parent_id === null ? null : (int) $category->parent_id;
-            $parentId = array_key_exists('parent_id', $data)
-                ? ($data['parent_id'] === null ? null : (int) $data['parent_id'])
-                : $currentParent;
+        try {
+            return DB::transaction(function () use ($id, $data) {
+                $category = Category::query()->lockForUpdate()->findOrFail($id);
+                $currentParent = $category->parent_id === null ? null : (int) $category->parent_id;
+                $parentId = array_key_exists('parent_id', $data)
+                    ? ($data['parent_id'] === null ? null : (int) $data['parent_id'])
+                    : $currentParent;
 
-            if (($currentParent === null) !== ($parentId === null)) {
-                $this->reject('parent_id', '主分類與子分類的角色建立後不可互相轉換。');
-            }
-            if ($parentId === $id) {
-                $this->reject('parent_id', '分類不可將自己設為上層分類。');
-            }
-            if ($parentId !== null) {
-                // 同一 parent（含明確提交）不是搬移，允許保留 inactive root。
-                $this->validateParent($parentId, $parentId !== $currentParent);
-            }
-            $name = $data['name'] ?? $category->name;
-            $this->validateName($name, $parentId, $id);
-            $category->fill(array_intersect_key($data, array_flip(['name', 'sort_order'])));
-            $category->parent_id = $parentId;
-            $category->save();
+                if (($currentParent === null) !== ($parentId === null)) {
+                    $this->reject('parent_id', '主分類與子分類的角色建立後不可互相轉換。');
+                }
+                if ($parentId === $id) {
+                    $this->reject('parent_id', '分類不可將自己設為上層分類。');
+                }
+                if ($parentId !== null) {
+                    // 同一 parent（含明確提交）不是搬移，允許保留 inactive root。
+                    $this->validateParent($parentId, $parentId !== $currentParent);
+                }
+                $name = $data['name'] ?? $category->name;
+                $this->validateName($name, $parentId, $id);
+                $category->fill(array_intersect_key($data, array_flip(['name', 'sort_order'])));
+                $category->parent_id = $parentId;
+                $category->save();
 
-            return $category;
-        });
+                return $category;
+            });
+        } catch (QueryException $exception) {
+            CategoryReferenceError::rethrow($exception, 'categories_parent_id_foreign', 'parent_id', '主分類已不存在，請重新選擇。');
+        }
     }
 
     public function changeStatus(int $id, string $status): Category
@@ -68,6 +78,23 @@ class AdminCategoryService
             $category->status = $status;
             $category->save();
             return $category;
+        });
+    }
+
+    public function delete(int $id): void
+    {
+        DB::transaction(function () use ($id) {
+            $category = Category::query()->lockForUpdate()->findOrFail($id);
+            // Inspect both kinds of direct reference, even for malformed legacy hierarchies.
+            if ($category->children()->exists()) {
+                $this->reject('category', '此分類仍有子分類，無法刪除。');
+            }
+            if ($category->products()->exists()) {
+                $this->reject('category', '此分類仍有商品使用，無法刪除。');
+            }
+            if (! $category->delete()) {
+                throw new \RuntimeException('無法刪除分類。');
+            }
         });
     }
 
