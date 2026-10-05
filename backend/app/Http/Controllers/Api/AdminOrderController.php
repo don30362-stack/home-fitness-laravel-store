@@ -4,14 +4,36 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AdminOrderIndexRequest;
+use App\Http\Requests\UpdateAdminOrderStatusRequest;
+use App\Http\Requests\UpdateAdminOrderPaymentStatusRequest;
+use App\Http\Requests\UpdateAdminOrderShipmentRequest;
 use App\Http\Resources\AdminOrderResource;
 use App\Http\Resources\AdminOrderSummaryResource;
 use App\Models\Order;
+use App\Services\AdminOrderService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class AdminOrderController extends Controller
 {
+    public function updateStatus(UpdateAdminOrderStatusRequest $request, string $id, AdminOrderService $service): AdminOrderResource
+    {
+        return (new AdminOrderResource($service->updateStatus((int) $id, $request->validated('order_status'))))
+            ->additional(['message' => '訂單狀態更新成功。']);
+    }
+
+    public function updatePaymentStatus(UpdateAdminOrderPaymentStatusRequest $request, string $id, AdminOrderService $service): AdminOrderResource
+    {
+        return (new AdminOrderResource($service->updatePaymentStatus((int) $id, $request->validated('payment_status'))))
+            ->additional(['message' => '付款狀態更新成功。']);
+    }
+
+    public function updateShipment(UpdateAdminOrderShipmentRequest $request, string $id, AdminOrderService $service): AdminOrderResource
+    {
+        return (new AdminOrderResource($service->updateShipment((int) $id, $request->validated())))
+            ->additional(['message' => '物流資料更新成功。']);
+    }
+
     public function index(AdminOrderIndexRequest $request): AnonymousResourceCollection
     {
         $data = $request->validated();

@@ -247,15 +247,18 @@ class AdminOrderApiTest extends TestCase
         $this->assertSame(4, $counts[0]); // admin.active + paginator count + orders + eager-loaded users.
     }
 
-    public function test_no_stage21_mutation_or_user_routes_exist(): void
+    public function test_stage21_routes_only_contain_reads_and_three_lifecycle_patches(): void
     {
         $paths = [];
         foreach (app('router')->getRoutes() as $route) {
             if (str_starts_with($route->uri(), 'api/admin/orders') || str_starts_with($route->uri(), 'api/admin/users')) {
-                $this->assertSame(['GET', 'HEAD'], $route->methods());
-                $paths[] = $route->uri();
+                $paths[$route->uri()] = $route->methods();
             }
         }
-        $this->assertSame(['api/admin/orders', 'api/admin/orders/{id}'], $paths);
+        $this->assertSame([
+            'api/admin/orders' => ['GET', 'HEAD'], 'api/admin/orders/{id}' => ['GET', 'HEAD'],
+            'api/admin/orders/{id}/status' => ['PATCH'], 'api/admin/orders/{id}/payment-status' => ['PATCH'],
+            'api/admin/orders/{id}/shipment' => ['PATCH'],
+        ], $paths);
     }
 }

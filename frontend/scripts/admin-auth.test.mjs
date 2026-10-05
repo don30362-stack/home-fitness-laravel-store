@@ -1600,12 +1600,12 @@ for (const phase of ['list', 'detail']) {
     })
   }
 }
-test('Admin Order detail snapshot render/null logistics, read-only, link back keeps filters', async () => {
+test('Admin Order detail GET snapshot/null logistics, link back keeps filters', async () => {
   const view = await ordersView('/admin/orders/1?search=keep&page=2')
   const main = find(view.root, el => el.type === 'main')
   for (const value of ['目前會員姓名','下單時訂購人','下單時收件人','歷史地址','下單時商品名','SNAP-OLD','顏色：黑色','600.00','1200.00','1300.00','尚未提供']) assert.ok(text(main).includes(value))
   assert.ok(find(main, el => el.type === 'a' && el.props.href === '/admin/orders?search=keep&page=2'))
-  assert.equal(find(main, el => el.type === 'button'), undefined, 'no mutation buttons')
+  assert.ok(button(view, '設為處理中'))
   assertReadOnlyOrderCalls(); view.app.unmount()
 })
 test('Admin Order detail 404/loading/logistics update and fresh GET on re-entry', async () => {
@@ -1655,3 +1655,147 @@ for (const outcome of ['success', 'error']) {
     })
   }
 }
+
+// Stage 21 Step 2: SFC memory rendering + real services, not browser or row-lock acceptance.
+const lifecycleBoundary = () => {
+  assert.ok(calls.every(c => c.method === 'get' ? /^\/admin\/orders\/\d+$/.test(c.url)
+    : c.method === 'patch' && /^\/admin\/orders\/\d+\/(status|payment-status|shipment)$/.test(c.url)))
+  assertMemberUntouched()
+}
+const submitShipment = async view => {
+  const form=find(view.root,el=>el.props['aria-label']==='物流維護表單')
+  assert.ok(form);form.props.onSubmit({preventDefault(){}});await settle()
+}
+const lifecycleCases = [
+  ['status','pending','unpaid','設為處理中',{order_status:'processing'}],
+  ['payment-status','processing','unpaid','標記為已付款',{payment_status:'paid'}],
+  ['shipment','processing','unpaid','儲存物流並出貨',{logistics_company:'物流公司',tracking_number:'TRACK-NEW'}],
+  ['status','shipped','paid','設為已完成',{order_status:'completed'}],
+]
+const invokeLifecycle = async (view,endpoint,label) => {
+  if(endpoint==='shipment') {
+    await inputValue(view,'order-logistics-company',' 物流公司 ')
+    await inputValue(view,'order-tracking-number',' TRACK-NEW ')
+    await submitShipment(view)
+  } else await click(view,label)
+}
+
+test('Admin Order lifecycle services use three strict PATCH endpoints/adminApi; no cancel service',async()=>{
+  api.defaults.adapter=async c=>{calls.push(c);return response(c,{data:adminOrderDetail,message:'backend message'})}
+  const payloads=[{order_status:'processing'},{payment_status:'paid'},{logistics_company:'company',tracking_number:'tracking'}]
+  const services=[orderService.updateAdminOrderStatus,orderService.updateAdminOrderPaymentStatus,orderService.updateAdminOrderShipment]
+  for(let i=0;i<services.length;i++)assert.deepEqual(await services[i](1,payloads[i]),{data:adminOrderDetail,message:'backend message'})
+  assert.deepEqual(calls.map(c=>[c.method,c.url,JSON.parse(c.data)]),payloads.map((p,i)=>['patch',`/admin/orders/1/${['status','payment-status','shipment'][i]}`,p]))
+  assert.equal(orderService.cancelAdminOrder,undefined);lifecycleBoundary()
+})
+for(const [state,paid,statusAction,shipment,payment] of [
+  ['pending','unpaid','設為處理中',false,true],['processing','unpaid',null,true,true],
+  ['shipped','paid','設為已完成',true,false],['shipped','unpaid',null,true,true],
+  ['completed','paid',null,false,false],['completed','unpaid',null,false,true],['cancelled','unpaid',null,false,false],
+]) {
+ test(`Order lifecycle UI ${state}/${paid}: only legal actions, terminal logistics readonly`,async()=>{
+  api.defaults.adapter=async c=>{calls.push(c);return response(c,{data:{...adminOrderDetail,order_status:state,payment_status:paid}})}
+  const view=await ordersView('/admin/orders/1')
+  assert.equal(Boolean(button(view,'設為處理中')),statusAction==='設為處理中')
+  assert.equal(Boolean(button(view,'設為已完成')),statusAction==='設為已完成')
+  assert.equal(Boolean(button(view,'標記為已付款')),payment)
+  assert.equal(Boolean(find(view.root,el=>el.props['aria-label']==='物流維護表單')),shipment)
+  assert.equal(find(view.root,el=>el.type==='select'),undefined)
+  if(state==='shipped'&&paid==='unpaid')assert.ok(text(view.root).includes('請先標記為已付款後再完成'))
+  assert.equal(mutations().length,0);lifecycleBoundary();view.app.unmount()
+ })
+}
+for(const [endpoint,state,paid,label,payload] of lifecycleCases) {
+ test(`Order ${endpoint}/${label}: mutex/direct guards/no optimistic/authoritative GET`,async()=>{
+  let finishPatch,finishGet
+  const original={...adminOrderDetail,order_status:state,payment_status:paid}
+  api.defaults.adapter=c=>{calls.push(c);if(c.method==='patch')return new Promise(resolve=>{finishPatch=()=>resolve(response(c,{data:{...original,order_no:'PATCH-NOT-AUTHORITY'},message:'操作正式成功'}))})
+    if(calls.filter(c=>c.method==='get').length===1)return Promise.resolve(response(c,{data:original}))
+    return new Promise(resolve=>{finishGet=()=>resolve(response(c,{data:{...original,...payload,order_no:'GET-AUTHORITY'}}))})}
+  const view=await ordersView('/admin/orders/1');await invokeLifecycle(view,endpoint,label)
+  assert.equal(mutations().length,1);assert.deepEqual(JSON.parse(mutations()[0].data),payload)
+  const collect=el=>{if(el.type==='button'){assert.equal(el.props.disabled,true);if(el.props.onClick)el.props.onClick()}el.children.forEach(collect)}
+  collect(find(view.root,el=>el.props['aria-label']==='訂單處理操作'))
+  const form=find(view.root,el=>el.props['aria-label']==='物流維護表單');if(form)form.props.onSubmit({preventDefault(){}})
+  await settle();assert.equal(mutations().length,1);assert.equal(calls.length,2)
+  assert.ok(text(view.root).includes('HF-READ-001'));assert.ok(!text(view.root).includes('PATCH-NOT-AUTHORITY'))
+  finishPatch();await settle();assert.equal(calls.length,3);assert.ok(text(view.root).includes('操作正式成功'))
+  assert.ok(text(view.root).includes('HF-READ-001'));assert.ok(!text(view.root).includes('PATCH-NOT-AUTHORITY'))
+  finishGet();await settle();assert.ok(text(view.root).includes('GET-AUTHORITY'))
+  assert.equal(button(view,'重新讀取訂單').props.disabled,false);lifecycleBoundary();view.app.unmount()
+ })
+}
+for(const endpoint of ['status','payment-status','shipment']) {
+ for(const [status,code] of [[422],[403],[419],[undefined],[500],[401],[403,'ADMIN_ACCOUNT_DISABLED']]) {
+  test(`Order ${endpoint} ${status}/${code??''}: backend reason/draft retained/no retry/isolation`,async()=>{
+   const original={...adminOrderDetail,order_status:endpoint==='status'?'pending':'processing'}
+   api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:original}));const e=failure(c,status,code)
+    if(status===422)e.response.data.errors={[endpoint==='status'?'order_status':endpoint==='shipment'?'logistics_company':'payment_status']:['明確業務拒絕原因']}
+    return Promise.reject(e)}
+   const view=await ordersView('/admin/orders/1')
+   await invokeLifecycle(view,endpoint,endpoint==='status'?'設為處理中':'標記為已付款');await settle()
+   assert.equal(mutations().length,1);assert.equal(calls.filter(c=>c.method==='get').length,1)
+   if(status===401||code){assert.equal(view.router.currentRoute.value.name,'admin-login');assert.equal(auth.currentAdmin,null)}
+   else {
+    assert.ok(text(view.root).includes('HF-READ-001'));assert.ok(text(view.root).includes(status===422?'明確業務拒絕原因':status?'後端停用原因':'訂單操作失敗'))
+    assert.equal(button(view,'重新讀取訂單').props.disabled,false);assert.ok(auth.currentAdmin);assert.equal(auth.adminFailureReason,null)
+    if(endpoint==='shipment')assert.equal(find(view.root,el=>el.props.id==='order-tracking-number').value,' TRACK-NEW ')
+   }
+   lifecycleBoundary();view.app.unmount()
+  })
+ }
+}
+
+test('Order shipment correction keeps shipped and sends both trimmed fields, payment unchanged',async()=>{
+ let current={...adminOrderDetail,order_status:'shipped',logistics_company:'old',tracking_number:'old-no'}
+ api.defaults.adapter=async c=>{calls.push(c);if(c.method==='patch'){current={...current,...JSON.parse(c.data)};return response(c,{data:current,message:'物流已修正'})}return response(c,{data:current})}
+ const view=await ordersView('/admin/orders/1');await invokeLifecycle(view,'shipment','更新物流資料')
+ assert.ok(text(view.root).includes('物流已修正'));assert.ok(button(view,'更新物流資料'));assert.ok(text(view.root).includes('未付款'))
+ assert.equal(mutations().length,1);assert.equal(mutations()[0].url,'/admin/orders/1/shipment');lifecycleBoundary();view.app.unmount()
+})
+
+test('Order PATCH succeeds but GET fails: retain success, block stale mutation, manual retry only GET',async()=>{
+ let reads=0
+ api.defaults.adapter=c=>{calls.push(c);if(c.method==='patch')return Promise.resolve(response(c,{data:adminOrderDetail,message:'已成功變更'}))
+  reads++;if(reads===2)return Promise.reject(failure(c,503));return Promise.resolve(response(c,{data:{...adminOrderDetail,order_status:reads===1?'pending':'processing'}}))}
+ const view=await ordersView('/admin/orders/1');await click(view,'設為處理中');await settle()
+ assert.ok(text(view.root).includes('已成功變更'));assert.ok(text(view.root).includes('最新資料重新載入失敗'))
+ assert.equal(button(view,'設為處理中').props.disabled,true);button(view,'設為處理中').props.onClick();await settle()
+ assert.equal(mutations().length,1);await click(view,'重試讀取')
+ assert.equal(mutations().length,1);assert.equal(reads,3);assert.ok(text(view.root).includes('已成功變更'))
+ assert.ok(!text(view.root).includes('最新資料重新載入失敗'));assert.equal(button(view,'設為處理中'),undefined)
+ lifecycleBoundary();view.app.unmount()
+})
+for(const phase of ['mutation','refresh']) {
+ for(const outcome of ['success','error']) {
+  for(const destination of ['/admin/orders/2','/admin/dashboard']) {
+   test(`Order late ${phase} ${outcome} after ${destination}: no message/error/state/navigation contamination`,async()=>{
+    let finish,oldReads=0
+    api.defaults.adapter=c=>{calls.push(c)
+     const deferred=()=>new Promise((resolve,reject)=>{finish=()=>outcome==='success'?resolve(response(c,{data:{...adminOrderDetail,order_no:'LATE-OLD'},message:'LATE-MESSAGE'})):reject(failure(c,500))})
+     if(c.method==='patch')return phase==='mutation'?deferred():Promise.resolve(response(c,{data:adminOrderDetail,message:'LATE-MESSAGE'}))
+     if(c.url.endsWith('/2'))return Promise.resolve(response(c,{data:{...adminOrderDetail,id:2,order_no:'SECOND-ORDER'}}))
+     if(++oldReads>1)return deferred()
+     return Promise.resolve(response(c,{data:adminOrderDetail}))}
+    const view=await ordersView('/admin/orders/1');await click(view,'設為處理中');await settle()
+    await view.router.push(destination);await settle();finish();await settle();await settle()
+    assert.equal(view.router.currentRoute.value.path,destination)
+    if(destination.endsWith('/2'))assert.ok(text(view.root).includes('SECOND-ORDER'))
+    for(const forbidden of ['LATE-OLD','LATE-MESSAGE','後端停用原因','最新資料重新載入失敗'])assert.ok(!text(view.root).includes(forbidden))
+    assert.equal(calls.filter(c=>c.method==='get'&&c.url.endsWith('/1')).length,phase==='mutation'?1:2)
+    lifecycleBoundary();view.app.unmount()
+   })
+  }
+ }
+}
+
+test('Old mutation finally cannot unlock a newer order mutation',async()=>{
+ const finishes={}
+ api.defaults.adapter=c=>{calls.push(c);if(c.method==='patch')return new Promise(resolve=>{finishes[c.url]=()=>resolve(response(c,{data:adminOrderDetail,message:'done'}))})
+  const id=c.url.endsWith('/2')?2:1;return Promise.resolve(response(c,{data:{...adminOrderDetail,id,order_no:`ORDER-${id}`}}))}
+ const view=await ordersView('/admin/orders/1');await click(view,'設為處理中');await view.router.push('/admin/orders/2');await settle();await click(view,'標記為已付款')
+ finishes['/admin/orders/1/status']();await settle();assert.equal(button(view,'設為處理中').props.disabled,true)
+ button(view,'設為處理中').props.onClick();await settle();assert.equal(mutations().length,2)
+ finishes['/admin/orders/2/payment-status']();await settle();await settle();assert.equal(button(view,'重新讀取訂單').props.disabled,false)
+ lifecycleBoundary();view.app.unmount()
+})

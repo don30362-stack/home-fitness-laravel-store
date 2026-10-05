@@ -1,4 +1,4 @@
-import type { ApiResponse, PaginatedApiResponse } from './api'
+import type { ApiResponse, ApiMessageResponse, PaginatedApiResponse } from './api'
 
 export type AdminOrderStatus = 'pending' | 'processing' | 'shipped' | 'completed' | 'cancelled'
 export type AdminPaymentStatus = 'unpaid' | 'paid'
@@ -52,3 +52,7 @@ export interface AdminOrderListResponse extends PaginatedApiResponse<AdminOrderS
   links: { first: string; last: string; prev: string | null; next: string | null }
 }
 export type AdminOrderDetailResponse = ApiResponse<AdminOrderDetail>
+export type AdminOrderMutationResponse = ApiMessageResponse<AdminOrderDetail>
+export interface UpdateAdminOrderStatusPayload { order_status: AdminOrderStatus }
+export interface UpdateAdminOrderPaymentPayload { payment_status: AdminPaymentStatus }
+export interface UpdateAdminOrderShipmentPayload { logistics_company: string; tracking_number: string }
