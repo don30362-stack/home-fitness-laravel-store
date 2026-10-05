@@ -30,6 +30,8 @@ const adminViews = {
   InventoryManagementView: '/src/views/admin/InventoryManagementView.vue',
   CategoryManagementView: '/src/views/admin/CategoryManagementView.vue',
   CategoryForm: '/src/components/admin/CategoryForm.vue',
+  OrderManagementView: '/src/views/admin/OrderManagementView.vue',
+  AdminOrderDetailView: '/src/views/admin/AdminOrderDetailView.vue',
 }
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', plugins: [{
   name: 'admin-test-sfc', enforce: 'pre',
@@ -60,6 +62,7 @@ const routes = await server.ssrLoadModule('/src/router/adminRoutes.ts')
 const productService = await server.ssrLoadModule('/src/services/adminProductService.ts')
 const inventoryService = await server.ssrLoadModule('/src/services/adminInventoryService.ts')
 const categoryService = await server.ssrLoadModule('/src/services/adminCategoryService.ts')
+const orderService = await server.ssrLoadModule('/src/services/adminOrderService.ts')
 const originalError = console.error
 console.error = () => {}
 after(async () => { console.error = originalError; await server.close() })
@@ -89,6 +92,17 @@ const productDetail = { ...productItem, category: { ...productItem.category, par
     image_url: 'http://localhost/storage/products/read.jpg', image_type: 'detail', is_primary: true, sort_order: 2 }],
   specifications: [{ id: 1, spec_name: '材質', spec_value: '鋼材', sort_order: 0 }],
   variants: [{ id: 1, option_name: '顏色', option_value: '黑色', stock: 3, status: 'inactive' }] }
+const adminOrderSummary = { id: 1, order_no: 'HF-READ-001', created_at: '2026-10-04T16:00:00Z',
+  total_amount: '1300.00', payment_method: 'cod', payment_status: 'unpaid', order_status: 'pending',
+  user: { id: user.id, name: '目前會員姓名', email: 'current@example.test' } }
+const adminOrderDetail = { ...adminOrderSummary, updated_at: '2026-10-04T16:00:00Z',
+  user: { ...adminOrderSummary.user, status: 'active' },
+  purchaser: { name: '下單時訂購人', phone: '0912345678', email: 'snapshot@example.test' },
+  recipient: { name: '下單時收件人', phone: '0987654321', postal_code: '100', city: '臺北市', district: '中正區', address: '歷史地址' },
+  shipping_method: 'home_delivery', shipping_fee: '100.00', subtotal: '1200.00', logistics_company: null, tracking_number: null,
+  items: [{ id: 1, product_id: 88, product_variant_id: 9, product_code: 'SNAP-OLD', product_name: '下單時商品名',
+    variant: '顏色：黑色', unit_price: '600.00', quantity: 2, subtotal: '1200.00' }] }
+const adminOrderPage = (data = [adminOrderSummary], page = 1, last = 2) => ({ ...productPage(data, page, last) })
 const response = (config, data, status = 200) => ({ config, data, status, statusText: '', headers: {} })
 const failure = (config, status, code) => new axios.AxiosError('test error', status ? 'ERR_BAD_RESPONSE' : 'ERR_NETWORK', config, undefined,
   status ? response(config, { message: '後端停用原因', ...(code ? { code } : {}) }, status) : undefined)
@@ -109,6 +123,8 @@ beforeEach(() => {
     calls.push(config)
     if (config.url === '/categories') return response(config, { data: categoryOptions })
     if (config.url === '/admin/categories') return response(config, { data: adminCategoryTree })
+    if (config.url === '/admin/orders') return response(config, adminOrderPage())
+    if (/^\/admin\/orders\/\d+$/.test(config.url)) return response(config, { data: adminOrderDetail })
     if (config.url === '/admin/products') return response(config, productPage())
     if (config.url === '/admin/inventory') return response(config, productPage([]))
     if (config.url.startsWith('/admin/products/')) return response(config, { data: productDetail })
@@ -353,7 +369,7 @@ const mountRoute = async (url, instance = memoryRouter()) => {
   return { ...instance, root, app }
 }
 
-for (const path of ['/admin/dashboard', '/admin/orders', '/admin/does-not-exist', '/admin/products', '/admin/products/1', '/admin/products/new', '/admin/products/1/edit', '/admin/inventory', '/admin/categories']) {
+for (const path of ['/admin/dashboard', '/admin/orders', '/admin/orders/1', '/admin/does-not-exist', '/admin/products', '/admin/products/1', '/admin/products/new', '/admin/products/1/edit', '/admin/inventory', '/admin/categories']) {
   test(`guest/member-only ${path} 經真 guard 導登入；會員身分不等於 Admin`, async () => {
     auth.currentAdmin = null
     api.defaults.adapter = (config) => { calls.push(config); return Promise.reject(failure(config, 401)) }
@@ -377,11 +393,11 @@ test('Admin-only 八模組保持階段對照，products／inventory／categories
     await view.router.push('/admin/' + item.path); await settle()
     const main = find(view.root, (el) => el.type === 'main')
     assert.ok(text(main).includes(item.title))
-    if (['products', 'inventory', 'categories'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
+    if (['products', 'inventory', 'categories', 'orders'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
     else { assert.ok(text(main).includes('尚未實作')); assert.ok(text(main).includes('Stage ' + item.stage)) }
   }
   assert.deepEqual(routes.adminModules.map((item) => item.stage), [24, 19, 20, 19, 21, 21, 22, 23])
-  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/categories', '/admin/inventory', '/admin/products', '/categories', '/categories']); assert.equal(member.currentUser, null)
+  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/categories', '/admin/inventory', '/admin/orders', '/admin/products', '/categories', '/categories']); assert.equal(member.currentUser, null)
   const frontLink = find(view.root, (el) => el.type === 'a' && el.props.href === '/')
   assert.ok(frontLink); assert.equal(frontLink.props.onClick, undefined)
   const menu = find(view.root, (el) => el.type === 'button' && text(el) === '選單')
@@ -1167,10 +1183,10 @@ test('離開分類route後晚到GET不覆蓋其他模組，返回時重新讀取
     finish = () => resolve(response(config, { data: adminCategoryTree }))
   }) }
   const view = await categoriesView()
-  await view.router.push('/admin/orders'); await settle()
+  await view.router.push('/admin/dashboard'); await settle()
   finish(); await settle()
   const main = find(view.root, el => el.type === 'main')
-  assert.ok(text(main).includes('訂單管理')); assert.ok(!text(main).includes('管理根分類'))
+  assert.ok(text(main).includes('Dashboard')); assert.ok(!text(main).includes('管理根分類'))
   api.defaults.adapter = async config => { calls.push(config); return response(config, { data: adminCategoryTree }) }
   await view.router.push('/admin/categories'); await settle()
   assert.ok(text(view.root).includes('管理根分類')); assert.equal(calls.length, 2)
@@ -1388,9 +1404,9 @@ test('Category mutation離頁後晚到success不導航、不刷新、不污染�
     finish = () => resolve(response(c, { data: categoryMutationRow({}), message: '舊成功' }))
   }))
   const view = await categoriesView(); await click(view, '新增主分類'); await inputValue(view, 'category-name', 'draft'); await submitCategory(view)
-  await view.router.push('/admin/orders'); await settle(); const count = calls.length
+  await view.router.push('/admin/dashboard'); await settle(); const count = calls.length
   finish(); await settle()
-  assert.equal(view.router.currentRoute.value.name, 'admin-orders'); assert.ok(!text(view.root).includes('舊成功'))
+  assert.equal(view.router.currentRoute.value.name, 'admin-dashboard'); assert.ok(!text(view.root).includes('舊成功'))
   assert.equal(calls.length, count); assertCategoryMutationBoundary(); view.app.unmount()
 })
 
@@ -1436,8 +1452,8 @@ for(const [status,code] of [[422],[403],[419],[undefined],[500],[401],[403,'ADMI
 }
 test('Category status route leave keeps stale protection and never refreshes another module',async()=>{
  let finish;api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:adminCategoryTree}));return new Promise(resolve=>{finish=()=>resolve(response(c,{data:categoryMutationRow(),message:'late status success'}))})}
- const view=await categoriesView();await click(view,'啟用主分類');await click(view,'確認變更狀態');await view.router.push('/admin/orders');await settle();finish();await settle()
- assert.equal(view.router.currentRoute.value.path,'/admin/orders');assert.ok(!text(view.root).includes('late status success'));assert.equal(calls.filter(c=>c.method==='get').length,1);assertMemberUntouched();view.app.unmount()
+ const view=await categoriesView();await click(view,'啟用主分類');await click(view,'確認變更狀態');await view.router.push('/admin/dashboard');await settle();finish();await settle()
+ assert.equal(view.router.currentRoute.value.path,'/admin/dashboard');assert.ok(!text(view.root).includes('late status success'));assert.equal(calls.filter(c=>c.method==='get').length,1);assertMemberUntouched();view.app.unmount()
 })
 
 const assertCategoryDeleteBoundary = () => {
@@ -1493,11 +1509,149 @@ for(const [status,code] of [[403],[419],[undefined],[500],[401],[403,'ADMIN_ACCO
 for(const outcome of ['success','failure']) {
  test(`Category DELETE route leave late ${outcome}: no navigation/message/GET contamination`,async()=>{
   let finish;api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:adminCategoryTree}));return new Promise((resolve,reject)=>{finish=()=>outcome==='success'?resolve(response(c,{message:'late delete success'})):reject(failure(c,500))})}
-  const view=await categoriesView();await click(view,'刪除主分類');await click(view,'確認刪除分類');await view.router.push('/admin/orders');await settle();finish();await settle()
-  assert.equal(view.router.currentRoute.value.path,'/admin/orders');assert.ok(!text(view.root).includes('late delete success'));assert.ok(!text(view.root).includes('後端停用原因'));assert.equal(calls.filter(c=>c.method==='get').length,1);assertCategoryDeleteBoundary();view.app.unmount()
+  const view=await categoriesView();await click(view,'刪除主分類');await click(view,'確認刪除分類');await view.router.push('/admin/dashboard');await settle();finish();await settle()
+  assert.equal(view.router.currentRoute.value.path,'/admin/dashboard');assert.ok(!text(view.root).includes('late delete success'));assert.ok(!text(view.root).includes('後端停用原因'));assert.equal(calls.filter(c=>c.method==='get').length,1);assertCategoryDeleteBoundary();view.app.unmount()
  })
 }
 test('Category DELETE service reuses message-only type and adminApi without body',async()=>{
  api.defaults.adapter=c=>{calls.push(c);return Promise.resolve(response(c,{message:'刪除回應'}))}
  const result=await categoryService.deleteAdminCategory(7);assert.deepEqual(result,{message:'刪除回應'});assert.equal(calls[0].method,'delete');assert.equal(calls[0].url,'/admin/categories/7');assert.equal(calls[0].data,undefined);assertCategoryDeleteBoundary()
 })
+
+// Stage 21 Step 1: real SFCs / memory router / Axios adapter; not browser acceptance.
+const ordersView = async (url = '/admin/orders') => {
+  auth.isAdminInitialized = true
+  return mountRoute(url)
+}
+const assertReadOnlyOrderCalls = () => {
+  assert.ok(calls.every(c => c.method === 'get' && /^\/admin\/orders(?:\/\d+)?$/.test(c.url)))
+  assertMemberUntouched()
+}
+test('Admin Order service only GETs list/detail through independent adminApi, passes query/envelopes', async () => {
+  const params = { search: 'HF-', order_status: 'pending', payment_status: 'paid', date_from: '2026-10-05', date_to: '2026-10-05', page: 2 }
+  assert.deepEqual(await orderService.getAdminOrders(params), adminOrderPage())
+  assert.deepEqual(await orderService.getAdminOrder('1'), adminOrderDetail)
+  assert.deepEqual(calls.map(c => [c.method, c.url]), [['get', '/admin/orders'], ['get', '/admin/orders/1']])
+  assert.deepEqual(calls[0].params, params); assertReadOnlyOrderCalls()
+})
+test('Admin orders replace placeholder, current identity/list fields/detail link, no mutation controls', async () => {
+  const view = await ordersView()
+  const main = find(view.root, el => el.type === 'main')
+  for (const value of ['訂單管理', adminOrderSummary.order_no, '目前會員姓名', 'current@example.test', '待處理', '未付款']) assert.ok(text(main).includes(value))
+  for (const value of ['尚未實作', '下單時收件人', '下單時商品名', '取消訂單', '更新付款']) assert.ok(!text(main).includes(value))
+  assert.equal(find(main, el => el.type === 'button' && ['出貨', '處理中', '完成', '取消', '更新付款'].includes(text(el).trim())), undefined)
+  assert.ok(find(main, el => el.type === 'a' && el.props.href === '/admin/orders/1'))
+  assertReadOnlyOrderCalls(); view.app.unmount()
+})
+test('Admin orders initial loading waits for GET and then renders', async () => {
+  let finish
+  api.defaults.adapter = c => { calls.push(c); return new Promise(resolve => { finish = () => resolve(response(c, adminOrderPage())) }) }
+  const view = await ordersView(); assert.ok(text(view.root).includes('訂單載入中'))
+  finish(); await settle(); assert.ok(text(view.root).includes(adminOrderSummary.order_no)); assertReadOnlyOrderCalls(); view.app.unmount()
+})
+test('Admin orders empty/reload query reconstruction and pagination preserve every filter', async () => {
+  api.defaults.adapter = async c => { calls.push(c); return response(c, adminOrderPage([], Number(c.params.page), 2)) }
+  const query = { search: 'HF-', order_status: 'pending', payment_status: 'unpaid', date_from: '2026-10-01', date_to: '2026-10-05', page: '2' }
+  const view = await ordersView('/admin/orders?' + new URLSearchParams(query))
+  assert.ok(text(view.root).includes('沒有符合條件的訂單')); assert.deepEqual(calls[0].params, query)
+  for (const [id, field] of [['order-search','search'], ['order-status','order_status'], ['order-payment-status','payment_status'], ['order-date-from','date_from'], ['order-date-to','date_to']]) {
+    const input = find(view.root, el => el.props.id === id)
+    assert.equal(input.type === 'select' ? input.options[input.selectedIndex]?.value : input.value, query[field])
+  }
+  await click(view, '上一頁')
+  assert.deepEqual({ ...view.router.currentRoute.value.query }, { ...query, page: '1' })
+  assertReadOnlyOrderCalls(); view.app.unmount()
+})
+test('Admin orders submit search/status/payment/dates resets page; back-forward restores authoritative URL', async () => {
+  const view = await ordersView('/admin/orders?search=old&page=2')
+  await inputValue(view, 'order-search', 'typed only'); assert.equal(calls.length, 1, 'typing does not issue requests')
+  await submitProductFilters(view, { 'order-search': ' HF-READ ', 'order-status': 'processing', 'order-payment-status': 'paid', 'order-date-from': '2026-10-01', 'order-date-to': '2026-10-05' })
+  const query = { search: 'HF-READ', order_status: 'processing', payment_status: 'paid', date_from: '2026-10-01', date_to: '2026-10-05', page: '1' }
+  assert.deepEqual({ ...view.router.currentRoute.value.query }, query); assert.deepEqual(calls.at(-1).params, query)
+  view.router.back(); await settle(); assert.equal(find(view.root, el => el.props.id === 'order-search').value, 'old')
+  assert.equal(view.router.currentRoute.value.query.page, '2')
+  view.router.forward(); await settle(); assert.deepEqual({ ...view.router.currentRoute.value.query }, query)
+  assertReadOnlyOrderCalls(); view.app.unmount()
+})
+test('Admin orders repeated query values are local format errors, not malformed backend requests', async () => {
+  const view = await ordersView('/admin/orders?search=a&search=b')
+  assert.ok(text(view.root).includes('查詢條件格式不正確')); assert.equal(calls.length, 0)
+  assertMemberUntouched(); view.app.unmount()
+})
+for (const phase of ['list', 'detail']) {
+  for (const status of [403, 419, undefined, 500, 422]) {
+    test(`Admin Order ${phase} ${status ?? 'network'} keeps identity/URL, manual retry only`, async () => {
+      api.defaults.adapter = c => { calls.push(c); return Promise.reject(failure(c, status)) }
+      const url = phase === 'list' ? '/admin/orders?search=keep' : '/admin/orders/1'
+      const view = await ordersView(url)
+      assert.ok(find(view.root, el => el.props.role === 'alert')); assert.equal(calls.length, 1)
+      assert.equal(view.router.currentRoute.value.fullPath, url); assert.equal(auth.currentAdmin.id, admin.id); assert.equal(auth.adminFailureReason, null)
+      api.defaults.adapter = async c => { calls.push(c); return response(c, phase === 'list' ? adminOrderPage() : { data: adminOrderDetail }) }
+      await click(view, '重試'); assert.ok(text(view.root).includes(adminOrderSummary.order_no))
+      assert.equal(calls.length, 2); assertReadOnlyOrderCalls(); view.app.unmount()
+    })
+  }
+  for (const [status, code] of [[401, undefined], [403, 'ADMIN_ACCOUNT_DISABLED']]) {
+    test(`Admin Order ${phase} ${status}/${code ?? ''} uses Admin coordinator without member side effects`, async () => {
+      api.defaults.adapter = c => { calls.push(c); return Promise.reject(failure(c, status, code)) }
+      const view = await ordersView(phase === 'list' ? '/admin/orders' : '/admin/orders/1'); await settle()
+      assert.equal(view.router.currentRoute.value.name, 'admin-login'); assert.equal(auth.currentAdmin, null)
+      assertReadOnlyOrderCalls(); view.app.unmount()
+    })
+  }
+}
+test('Admin Order detail snapshot render/null logistics, read-only, link back keeps filters', async () => {
+  const view = await ordersView('/admin/orders/1?search=keep&page=2')
+  const main = find(view.root, el => el.type === 'main')
+  for (const value of ['目前會員姓名','下單時訂購人','下單時收件人','歷史地址','下單時商品名','SNAP-OLD','顏色：黑色','600.00','1200.00','1300.00','尚未提供']) assert.ok(text(main).includes(value))
+  assert.ok(find(main, el => el.type === 'a' && el.props.href === '/admin/orders?search=keep&page=2'))
+  assert.equal(find(main, el => el.type === 'button'), undefined, 'no mutation buttons')
+  assertReadOnlyOrderCalls(); view.app.unmount()
+})
+test('Admin Order detail 404/loading/logistics update and fresh GET on re-entry', async () => {
+  let finish
+  api.defaults.adapter = c => { calls.push(c); return new Promise((resolve, reject) => { finish = () => reject(failure(c, 404)) }) }
+  const view = await ordersView('/admin/orders/1'); assert.ok(text(view.root).includes('訂單詳細載入中'))
+  finish(); await settle(); assert.ok(text(view.root).includes('訂單不存在'))
+  api.defaults.adapter = async c => { calls.push(c); return response(c, { data: { ...adminOrderDetail, logistics_company: '物流測試', tracking_number: 'TRACK-123' } }) }
+  await click(view, '重試'); assert.ok(text(view.root).includes('物流測試')); assert.ok(text(view.root).includes('TRACK-123'))
+  await view.router.push('/admin/dashboard'); await settle(); await view.router.push('/admin/orders/1'); await settle()
+  assert.equal(calls.length, 3); assertReadOnlyOrderCalls(); view.app.unmount()
+})
+for (const outcome of ['success', 'error']) {
+  for (const condition of ['search', 'page']) {
+    test(`Admin Order old list ${condition} ${outcome} cannot override newer URL/result`, async () => {
+      let finish
+      api.defaults.adapter = c => {
+        calls.push(c)
+        if (calls.length === 1) return new Promise((resolve, reject) => { finish = () => outcome === 'success'
+          ? resolve(response(c, adminOrderPage([{ ...adminOrderSummary, order_no: 'OLD-ORDER' }]))) : reject(failure(c, 500)) })
+        return Promise.resolve(response(c, adminOrderPage([{ ...adminOrderSummary, order_no: 'NEW-ORDER' }], 2)))
+      }
+      const view = await ordersView('/admin/orders?' + (condition === 'search' ? 'search=old' : 'page=1'))
+      await view.router.push('/admin/orders?' + (condition === 'search' ? 'search=new&page=2' : 'page=2')); await settle()
+      finish(); await settle(); assert.ok(text(view.root).includes('NEW-ORDER')); assert.ok(!text(view.root).includes('OLD-ORDER'))
+      assert.equal(find(view.root, el => el.props.role === 'alert'), undefined); assertReadOnlyOrderCalls(); view.app.unmount()
+    })
+  }
+  test(`Admin Order detail id switch ignores old ${outcome}`, async () => {
+    let finish
+    api.defaults.adapter = c => { calls.push(c); if (c.url.endsWith('/1')) return new Promise((resolve, reject) => { finish = () => outcome === 'success'
+      ? resolve(response(c, { data: adminOrderDetail })) : reject(failure(c, 500)) })
+      return Promise.resolve(response(c, { data: { ...adminOrderDetail, id: 2, order_no: 'SECOND-ORDER' } })) }
+    const view = await ordersView('/admin/orders/1'); await view.router.push('/admin/orders/2'); await settle()
+    finish(); await settle(); assert.ok(text(view.root).includes('SECOND-ORDER')); assert.ok(!text(view.root).includes('HF-READ-001'))
+    assert.equal(find(view.root, el => el.props.role === 'alert'), undefined); assertReadOnlyOrderCalls(); view.app.unmount()
+  })
+  for (const phase of ['list', 'detail']) {
+    test(`Admin Order ${phase} route leave ignores late ${outcome} without navigation/error contamination`, async () => {
+      let finish
+      api.defaults.adapter = c => { calls.push(c); return new Promise((resolve, reject) => { finish = () => outcome === 'success'
+        ? resolve(response(c, phase === 'list' ? adminOrderPage() : { data: adminOrderDetail })) : reject(failure(c, 500)) }) }
+      const view = await ordersView(phase === 'list' ? '/admin/orders' : '/admin/orders/1')
+      await view.router.push('/admin/dashboard'); await settle(); finish(); await settle()
+      assert.equal(view.router.currentRoute.value.name, 'admin-dashboard'); assert.ok(!text(view.root).includes('HF-READ-001'))
+      assert.ok(!text(view.root).includes('後端停用原因')); assert.equal(calls.length, 1); assertReadOnlyOrderCalls(); view.app.unmount()
+    })
+  }
+}

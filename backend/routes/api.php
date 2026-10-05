@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\AddressController;
 use App\Http\Controllers\Api\AdminAuthController;
 use App\Http\Controllers\Api\AdminCategoryController;
 use App\Http\Controllers\Api\AdminInventoryController;
+use App\Http\Controllers\Api\AdminOrderController;
 use App\Http\Controllers\Api\AdminProductController;
 use App\Http\Controllers\Api\AdminProductImageController;
 use App\Http\Controllers\Api\AuthController;
@@ -52,6 +53,8 @@ Route::prefix('admin')->group(function () {
         Route::post('/logout', [AdminAuthController::class, 'logout']);
         Route::get('/me', [AdminAuthController::class, 'me'])->middleware('admin.active');
         Route::middleware('admin.active')->group(function () {
+            Route::get('/orders', [AdminOrderController::class, 'index']);
+            Route::get('/orders/{id}', [AdminOrderController::class, 'show'])->whereNumber('id');
             Route::get('/categories', [AdminCategoryController::class, 'index']);
             Route::post('/categories', [AdminCategoryController::class, 'store']);
             Route::patch('/categories/{id}/status', [AdminCategoryController::class, 'status'])->whereNumber('id');
