@@ -310,8 +310,8 @@ const discardGuestCart = async () => {
 
 <template>
     <div class="container py-5">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h1 class="h2 mb-0">購物車</h1>
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+            <h1 class="h2 mb-0 flex-shrink-0">購物車</h1>
 
             <div class="d-flex align-items-center gap-3">
                 <span class="text-muted">
@@ -376,7 +376,7 @@ const discardGuestCart = async () => {
             <div class="col-12 col-lg-8">
                 <div class="border rounded">
                     <article v-for="item in cartItems" :key="getItemKey(item)" class="p-3 border-bottom cart-item">
-                        <div class="d-flex gap-3">
+                        <div class="d-flex flex-column flex-sm-row gap-3">
                             <RouterLink :to="{
                                 name: 'product-detail',
                                 params: {
@@ -393,7 +393,7 @@ const discardGuestCart = async () => {
                                 </div>
                             </RouterLink>
 
-                            <div class="flex-grow-1">
+                            <div class="flex-grow-1 cart-item-details">
                                 <RouterLink :to="{
                                     name: 'product-detail',
                                     params: {
@@ -525,6 +525,11 @@ const discardGuestCart = async () => {
     width: 110px;
     height: 110px;
     object-fit: cover;
+}
+
+.cart-item-details {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .quantity-value {
