@@ -251,7 +251,7 @@ class AdminOrderApiTest extends TestCase
     {
         $paths = [];
         foreach (app('router')->getRoutes() as $route) {
-            if (str_starts_with($route->uri(), 'api/admin/orders') || str_starts_with($route->uri(), 'api/admin/users')) {
+            if (str_starts_with($route->uri(), 'api/admin/orders')) {
                 $paths[$route->uri()] = $route->methods();
             }
         }

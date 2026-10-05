@@ -32,6 +32,8 @@ const adminViews = {
   CategoryForm: '/src/components/admin/CategoryForm.vue',
   OrderManagementView: '/src/views/admin/OrderManagementView.vue',
   AdminOrderDetailView: '/src/views/admin/AdminOrderDetailView.vue',
+  MemberManagementView: '/src/views/admin/MemberManagementView.vue',
+  AdminUserDetailView: '/src/views/admin/AdminUserDetailView.vue',
 }
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', plugins: [{
   name: 'admin-test-sfc', enforce: 'pre',
@@ -63,6 +65,7 @@ const productService = await server.ssrLoadModule('/src/services/adminProductSer
 const inventoryService = await server.ssrLoadModule('/src/services/adminInventoryService.ts')
 const categoryService = await server.ssrLoadModule('/src/services/adminCategoryService.ts')
 const orderService = await server.ssrLoadModule('/src/services/adminOrderService.ts')
+const userService = await server.ssrLoadModule('/src/services/adminUserService.ts')
 const originalError = console.error
 console.error = () => {}
 after(async () => { console.error = originalError; await server.close() })
@@ -103,6 +106,11 @@ const adminOrderDetail = { ...adminOrderSummary, updated_at: '2026-10-04T16:00:0
   items: [{ id: 1, product_id: 88, product_variant_id: 9, product_code: 'SNAP-OLD', product_name: '下單時商品名',
     variant: '顏色：黑色', unit_price: '600.00', quantity: 2, subtotal: '1200.00' }] }
 const adminOrderPage = (data = [adminOrderSummary], page = 1, last = 2) => ({ ...productPage(data, page, last) })
+const adminUser = { ...user, created_at: '2026-10-04T16:00:00Z', updated_at: '2026-10-04T16:00:00Z' }
+const userPage = (data = [adminUser], page = 1, last = 2) => productPage(data, page, last)
+const userDetail = (status = 'active', id = user.id, orders = [adminOrderSummary], page = 1) => ({
+  user: { ...adminUser, id, status }, orders: productPage(orders.map(({ user: ignored, ...order }) => order), page, 2),
+})
 const response = (config, data, status = 200) => ({ config, data, status, statusText: '', headers: {} })
 const failure = (config, status, code) => new axios.AxiosError('test error', status ? 'ERR_BAD_RESPONSE' : 'ERR_NETWORK', config, undefined,
   status ? response(config, { message: '後端停用原因', ...(code ? { code } : {}) }, status) : undefined)
@@ -124,6 +132,8 @@ beforeEach(() => {
     if (config.url === '/categories') return response(config, { data: categoryOptions })
     if (config.url === '/admin/categories') return response(config, { data: adminCategoryTree })
     if (config.url === '/admin/orders') return response(config, adminOrderPage())
+    if (config.url === '/admin/users') return response(config, userPage())
+    if (/^\/admin\/users\/\d+$/.test(config.url)) return response(config, { data: userDetail('active', Number(config.url.split('/').at(-1)), [adminOrderSummary], Number(config.params?.order_page ?? 1)) })
     if (/^\/admin\/orders\/\d+$/.test(config.url)) return response(config, { data: adminOrderDetail })
     if (config.url === '/admin/products') return response(config, productPage())
     if (config.url === '/admin/inventory') return response(config, productPage([]))
@@ -369,7 +379,7 @@ const mountRoute = async (url, instance = memoryRouter()) => {
   return { ...instance, root, app }
 }
 
-for (const path of ['/admin/dashboard', '/admin/orders', '/admin/orders/1', '/admin/does-not-exist', '/admin/products', '/admin/products/1', '/admin/products/new', '/admin/products/1/edit', '/admin/inventory', '/admin/categories']) {
+for (const path of ['/admin/dashboard', '/admin/orders', '/admin/orders/1', '/admin/does-not-exist', '/admin/products', '/admin/products/1', '/admin/products/new', '/admin/products/1/edit', '/admin/inventory', '/admin/categories', '/admin/users', '/admin/users/9']) {
   test(`guest/member-only ${path} 經真 guard 導登入；會員身分不等於 Admin`, async () => {
     auth.currentAdmin = null
     api.defaults.adapter = (config) => { calls.push(config); return Promise.reject(failure(config, 401)) }
@@ -393,11 +403,11 @@ test('Admin-only 八模組保持階段對照，products／inventory／categories
     await view.router.push('/admin/' + item.path); await settle()
     const main = find(view.root, (el) => el.type === 'main')
     assert.ok(text(main).includes(item.title))
-    if (['products', 'inventory', 'categories', 'orders'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
+    if (['products', 'inventory', 'categories', 'orders', 'users'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
     else { assert.ok(text(main).includes('尚未實作')); assert.ok(text(main).includes('Stage ' + item.stage)) }
   }
   assert.deepEqual(routes.adminModules.map((item) => item.stage), [24, 19, 20, 19, 21, 21, 22, 23])
-  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/categories', '/admin/inventory', '/admin/orders', '/admin/products', '/categories', '/categories']); assert.equal(member.currentUser, null)
+  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/categories', '/admin/inventory', '/admin/orders', '/admin/products', '/admin/users', '/categories', '/categories']); assert.equal(member.currentUser, null)
   const frontLink = find(view.root, (el) => el.type === 'a' && el.props.href === '/')
   assert.ok(frontLink); assert.equal(frontLink.props.onClick, undefined)
   const menu = find(view.root, (el) => el.type === 'button' && text(el) === '選單')
@@ -1895,4 +1905,199 @@ test('Old cancel finally cannot unlock newer order mutation or restore its confi
  button(view,'取消訂單').props.onClick();await settle();assert.equal(mutations().length,2);assert.equal(find(view.root,el=>el.props['aria-label']==='取消訂單確認'),undefined)
  assert.ok(!text(view.root).includes('old cancel message'));finishes['/admin/orders/2/payment-status']();await settle();await settle()
  assert.equal(button(view,'重新讀取訂單').props.disabled,false);cancelBoundary();view.app.unmount()
+})
+
+// Stage 21 Step 4: SFC/memory-router tests; not real-browser acceptance.
+const usersView = async (url = '/admin/users') => { auth.isAdminInitialized = true; return mountRoute(url) }
+const userBoundary = () => {
+  assert.ok(calls.every(c => c.method === 'get' && /^\/admin\/users(?:\/\d+)?$/.test(c.url) || c.method === 'patch' && /^\/admin\/users\/\d+\/status$/.test(c.url)))
+  for (const c of mutations()) assert.ok(['active','disabled'].includes(JSON.parse(c.data).status))
+  assertMemberUntouched()
+}
+const confirmUserStatus = async (view, status = 'active') => {
+  await click(view, status === 'active' ? '停用會員' : status === 'inactive' ? '恢復啟用（舊狀態）' : '恢復啟用')
+  await click(view, '確認變更會員狀態')
+}
+
+test('Admin User service exact three endpoints/query/history/envelopes/adminApi only', async () => {
+  const params = { search: 'member', status: 'inactive', page: 2 }
+  assert.deepEqual(await userService.getAdminUsers(params), userPage())
+  assert.deepEqual(await userService.getAdminUser('9', 2), userDetail('active', 9, [adminOrderSummary], 2))
+  api.defaults.adapter = async c => { calls.push(c); return response(c, { data: { ...adminUser, status: 'disabled' }, message: '成功' }) }
+  assert.equal((await userService.updateAdminUserStatus('9', { status: 'disabled' })).message, '成功')
+  assert.deepEqual(calls.map(c => [c.method,c.url]), [['get','/admin/users'],['get','/admin/users/9'],['patch','/admin/users/9/status']])
+  assert.deepEqual(calls[0].params, params); assert.deepEqual(calls[1].params, { order_page: 2 })
+  assert.deepEqual(JSON.parse(calls[2].data), { status: 'disabled' }); userBoundary()
+})
+
+test('User list is read-only, includes safe fields/detail link, no placeholder or delete', async () => {
+  const view = await usersView()
+  for (const value of ['會員管理', adminUser.name, adminUser.email, adminUser.phone, '啟用']) assert.ok(text(view.root).includes(value))
+  assert.ok(!text(view.root).includes('尚未實作')); assert.ok(!button(view,'停用會員'))
+  assert.ok(find(view.root, el => el.type === 'a' && el.props.href === '/admin/users/9'))
+  assert.equal(mutations().length,0); userBoundary(); view.app.unmount()
+})
+
+for (const status of ['active','disabled','inactive']) {
+  test(`User ${status} list filter and detail/history/status-control`, async () => {
+    api.defaults.adapter = async c => { calls.push(c); return response(c, c.url === '/admin/users' ? userPage([{ ...adminUser,status }]) : { data: userDetail(status) }) }
+    const view = await usersView('/admin/users?status='+status)
+    assert.equal(calls[0].params.status, status)
+    assert.ok(text(view.root).includes(status === 'inactive' ? '舊停用狀態' : status === 'active' ? '啟用' : '停用'))
+    await view.router.push('/admin/users/9'); await settle()
+    assert.ok(text(view.root).includes(adminUser.email)); assert.ok(text(view.root).includes(adminOrderSummary.order_no))
+    assert.ok(find(view.root,el=>el.type==='a'&&el.props.href==='/admin/orders/1'))
+    const action=status==='active'?'停用會員':status==='inactive'?'恢復啟用（舊狀態）':'恢復啟用'
+    await click(view,action)
+    assert.ok(text(view.root).includes(status==='active'?'下一次受保護請求':'舊 session 不會復活'))
+    if(status==='active')for(const phrase of ['地址','購物車','歷史訂單','不是立即全裝置登出','C06'])assert.ok(text(view.root).includes(phrase))
+    assert.equal(mutations().length,0); userBoundary(); view.app.unmount()
+  })
+}
+
+test('User list loading then empty, URL reload and pagination retain filters', async () => {
+  let finish
+  api.defaults.adapter = c => { calls.push(c); return new Promise(resolve=>{finish=()=>resolve(response(c,userPage([],2,2)))}) }
+  const view=await usersView('/admin/users?search=keep&status=inactive&page=2')
+  assert.ok(text(view.root).includes('會員載入中')); assert.deepEqual(calls[0].params,{search:'keep',status:'inactive',page:'2'})
+  finish();await settle();assert.ok(text(view.root).includes('沒有符合條件的會員'))
+  api.defaults.adapter=async c=>{calls.push(c);return response(c,userPage([],Number(c.params.page),2))}
+  await click(view,'上一頁');assert.deepEqual({...view.router.currentRoute.value.query},{search:'keep',status:'inactive',page:'1'})
+  userBoundary();view.app.unmount()
+})
+
+test('User list submit resets page; browser history core restores query and inputs', async () => {
+  const view=await usersView('/admin/users?search=old&status=active&page=2')
+  await inputValue(view,'user-search','draft');assert.equal(calls.length,1)
+  await submitProductFilters(view,{'user-search':' new search ','user-status':'disabled'})
+  assert.deepEqual({...view.router.currentRoute.value.query},{search:'new search',status:'disabled',page:'1'})
+  assert.deepEqual(calls.at(-1).params,{search:'new search',status:'disabled',page:'1'})
+  view.router.back();await settle();assert.equal(find(view.root,el=>el.props.id==='user-search').value,'old');assert.equal(view.router.currentRoute.value.query.page,'2')
+  view.router.forward();await settle();assert.equal(find(view.root,el=>el.props.id==='user-search').value,'new search')
+  userBoundary();view.app.unmount()
+})
+
+test('User repeated list/history query fail locally, no malformed GET', async () => {
+  let view=await usersView('/admin/users?status=active&status=disabled');assert.ok(text(view.root).includes('格式不正確'));assert.equal(calls.length,0);view.app.unmount()
+  view=await usersView('/admin/users/9?order_page=1&order_page=2');assert.ok(text(view.root).includes('分頁格式不正確'));assert.equal(calls.length,0);view.app.unmount()
+})
+
+test('User history order_page drives GET, preserves list query and user identity/back-forward', async () => {
+  const view=await usersView('/admin/users/9?search=keep&status=disabled&page=2&order_page=1')
+  await click(view,'下一頁');assert.equal(calls.at(-1).params.order_page,'2');assert.equal(view.router.currentRoute.value.params.id,'9')
+  assert.equal(view.router.currentRoute.value.query.search,'keep');assert.equal(view.router.currentRoute.value.query.page,'2')
+  assert.ok(find(view.root,el=>el.type==='a'&&el.props.href==='/admin/users?search=keep&status=disabled&page=2'))
+  view.router.back();await settle();assert.equal(calls.at(-1).params.order_page,'1')
+  view.router.forward();await settle();assert.equal(calls.at(-1).params.order_page,'2')
+  userBoundary();view.app.unmount()
+})
+
+test('User detail loading then empty history and 404 retry', async () => {
+  let finish
+  api.defaults.adapter=c=>{calls.push(c);return new Promise(resolve=>{finish=()=>resolve(response(c,{data:userDetail('disabled',9,[])}))})}
+  const view=await usersView('/admin/users/9');assert.ok(text(view.root).includes('會員詳細載入中'));finish();await settle();assert.ok(text(view.root).includes('尚無歷史訂單'))
+  api.defaults.adapter=c=>{calls.push(c);return Promise.reject(failure(c,404))}
+  await view.router.push('/admin/users/10');await settle();assert.ok(text(view.root).includes('會員不存在'))
+  api.defaults.adapter=async c=>{calls.push(c);return response(c,{data:userDetail('active',10,[])})}
+  await click(view,'重試');assert.ok(text(view.root).includes(adminUser.email));userBoundary();view.app.unmount()
+})
+
+for(const phase of ['list','detail'])for(const [status,code] of [[403],[419],[422],[undefined],[500],[401],[403,'ADMIN_ACCOUNT_DISABLED']]) {
+  test(`User ${phase} GET ${status}/${code??''}: error/retry/coordinator/isolation`,async()=>{
+    api.defaults.adapter=c=>{calls.push(c);return Promise.reject(failure(c,status,code))}
+    const url=phase==='list'?'/admin/users?search=keep':'/admin/users/9?order_page=2'
+    const view=await usersView(url);await settle()
+    if(status===401||code){assert.equal(view.router.currentRoute.value.name,'admin-login');assert.equal(auth.currentAdmin,null)}
+    else {
+      assert.ok(find(view.root,el=>el.props.role==='alert'));assert.equal(calls.length,1);assert.equal(view.router.currentRoute.value.fullPath,url);assert.ok(auth.currentAdmin);assert.equal(auth.adminFailureReason,null)
+      api.defaults.adapter=async c=>{calls.push(c);return response(c,phase==='list'?userPage():{data:userDetail()})}
+      await click(view,'重試');assert.ok(text(view.root).includes(adminUser.email));assert.equal(calls.length,2)
+    }
+    userBoundary();view.app.unmount()
+  })
+}
+
+test('User stale list response cannot overwrite new filter',async()=>{
+  let finish
+  api.defaults.adapter=c=>{calls.push(c);if(c.params.search==='old')return new Promise(resolve=>{finish=()=>resolve(response(c,userPage([{...adminUser,name:'OLD-USER'}])))})
+    return Promise.resolve(response(c,userPage([{...adminUser,name:'NEW-USER'}])))}
+  const view=await usersView('/admin/users?search=old');await view.router.push('/admin/users?search=new');await settle();finish();await settle()
+  assert.ok(text(view.root).includes('NEW-USER'));assert.ok(!text(view.root).includes('OLD-USER'));userBoundary();view.app.unmount()
+})
+
+for(const destination of ['/admin/users/10','/admin/users/9?order_page=2'])for(const outcome of ['success','error']) {
+  test(`User stale detail ${destination}/${outcome} cannot overwrite id/history context`,async()=>{
+    let finish
+    api.defaults.adapter=c=>{calls.push(c);if(calls.length===1)return new Promise((resolve,reject)=>{finish=()=>outcome==='error'?reject(failure(c,500)):resolve(response(c,{data:{...userDetail(),user:{...adminUser,name:'OLD-DETAIL'}}}))})
+      return Promise.resolve(response(c,{data:{...userDetail(),user:{...adminUser,name:'NEW-DETAIL'}}}))}
+    const view=await usersView('/admin/users/9');await view.router.push(destination);await settle();finish();await settle()
+    assert.ok(text(view.root).includes('NEW-DETAIL'));assert.ok(!text(view.root).includes('OLD-DETAIL'));assert.ok(!text(view.root).includes('後端停用原因'));userBoundary();view.app.unmount()
+  })
+}
+
+for(const status of ['active','disabled','inactive']) {
+  test(`User ${status} mutation guard/no optimistic/authoritative GET/backend message`,async()=>{
+    let finishPatch,finishGet;let reads=0
+    const target=status==='active'?'disabled':'active'
+    api.defaults.adapter=c=>{calls.push(c);if(c.method==='patch')return new Promise(resolve=>{finishPatch=()=>resolve(response(c,{data:{...adminUser,name:'PATCH-NOT-AUTHORITY',status:target},message:'會員操作正式成功'}))})
+      if(++reads===1)return Promise.resolve(response(c,{data:userDetail(status)}))
+      return new Promise(resolve=>{finishGet=()=>resolve(response(c,{data:{...userDetail(target),user:{...adminUser,name:'GET-AUTHORITY',status:target}}}))})}
+    const view=await usersView('/admin/users/9?order_page=2');await confirmUserStatus(view,status)
+    assert.deepEqual(JSON.parse(mutations()[0].data),{status:target})
+    for(const label of ['確認變更會員狀態','返回，不變更','重新讀取會員',status==='active'?'停用會員':status==='inactive'?'恢復啟用（舊狀態）':'恢復啟用']) {
+      assert.equal(button(view,label).props.disabled,true);button(view,label).props.onClick()
+    }
+    await settle();assert.equal(mutations().length,1);assert.equal(calls.length,2);assert.ok(!text(view.root).includes('PATCH-NOT-AUTHORITY'))
+    finishPatch();await settle();assert.ok(text(view.root).includes('會員操作正式成功'));assert.equal(calls.at(-1).params.order_page,'2');assert.ok(!text(view.root).includes('PATCH-NOT-AUTHORITY'))
+    finishGet();await settle();assert.ok(text(view.root).includes('GET-AUTHORITY'));assert.equal(button(view,'重新讀取會員').props.disabled,false)
+    userBoundary();view.app.unmount()
+  })
+}
+
+for(const [status,code] of [[422],[403],[419],[undefined],[500],[401],[403,'ADMIN_ACCOUNT_DISABLED']]) {
+  test(`User status ${status}/${code??''}: reason/no retry/detail preservation/isolation`,async()=>{
+    api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:userDetail()}));const error=failure(c,status,code)
+      if(status===422)error.response.data.errors={status:['會員業務拒絕原因']};return Promise.reject(error)}
+    const view=await usersView('/admin/users/9');await confirmUserStatus(view);await settle()
+    assert.equal(mutations().length,1);assert.equal(calls.filter(c=>c.method==='get').length,1)
+    if(status===401||code){assert.equal(view.router.currentRoute.value.name,'admin-login');assert.equal(auth.currentAdmin,null)}
+    else {assert.ok(text(view.root).includes(adminUser.email));assert.ok(text(view.root).includes(status===422?'會員業務拒絕原因':status?'後端停用原因':'會員狀態操作失敗'));assert.ok(button(view,'停用會員'));assert.equal(button(view,'重新讀取會員').props.disabled,false);assert.ok(auth.currentAdmin);assert.equal(auth.adminFailureReason,null)}
+    userBoundary();view.app.unmount()
+  })
+}
+
+test('User mutation success + GET failure keeps success/detail, manual retry only GET',async()=>{
+  let reads=0
+  api.defaults.adapter=c=>{calls.push(c);if(c.method==='patch')return Promise.resolve(response(c,{data:{...adminUser,status:'disabled'},message:'確定已成功'}))
+    if(++reads===2)return Promise.reject(failure(c,500));return Promise.resolve(response(c,{data:userDetail(reads===1?'active':'disabled')}))}
+  const view=await usersView('/admin/users/9?order_page=2');await confirmUserStatus(view);await settle()
+  assert.ok(text(view.root).includes('確定已成功'));assert.ok(text(view.root).includes('最新資料重新載入失敗'));assert.ok(button(view,'停用會員'));assert.equal(button(view,'停用會員').props.disabled,true)
+  button(view,'停用會員').props.onClick();await settle();assert.equal(mutations().length,1)
+  await click(view,'重試讀取');assert.equal(mutations().length,1);assert.equal(calls.filter(c=>c.method==='get').length,3);assert.ok(button(view,'恢復啟用'));assert.ok(!text(view.root).includes('最新資料重新載入失敗'));userBoundary();view.app.unmount()
+})
+
+for(const phase of ['mutation','refresh'])for(const destination of ['/admin/users/10','/admin/users/9?order_page=2','/admin/dashboard'])for(const outcome of ['success','error']) {
+  test(`User stale ${phase}/${destination}/${outcome} has no late refresh/message/navigation`,async()=>{
+    let finish,reads=0
+    const defer=c=>new Promise((resolve,reject)=>{finish=()=>outcome==='error'?reject(failure(c,500)):resolve(response(c,phase==='mutation'?{data:adminUser,message:'LATE-USER-MESSAGE'}:{data:{...userDetail(),user:{...adminUser,name:'LATE-USER-DATA'}}}))})
+    api.defaults.adapter=c=>{calls.push(c);if(c.method==='patch')return phase==='mutation'?defer(c):Promise.resolve(response(c,{data:adminUser,message:'LATE-USER-MESSAGE'}))
+      if(c.url.endsWith('/10')||c.params?.order_page==='2')return Promise.resolve(response(c,{data:{...userDetail(),user:{...adminUser,name:'NEW-USER-CONTEXT'}}}))
+      return ++reads===1?Promise.resolve(response(c,{data:userDetail()})):defer(c)}
+    const view=await usersView('/admin/users/9');await confirmUserStatus(view);await settle();await view.router.push(destination);await settle();finish();await settle();await settle()
+    assert.equal(view.router.currentRoute.value.fullPath,destination)
+    if(destination!=='/admin/dashboard')assert.ok(text(view.root).includes('NEW-USER-CONTEXT'))
+    for(const forbidden of ['LATE-USER-MESSAGE','LATE-USER-DATA','後端停用原因','最新資料重新載入失敗'])assert.ok(!text(view.root).includes(forbidden))
+    assert.equal(calls.filter(c=>c.method==='get'&&c.url.endsWith('/9')&&!c.params?.order_page).length,phase==='mutation'?1:2)
+    userBoundary();view.app.unmount()
+  })
+}
+
+test('User old finally cannot unlock mutation in newer user context',async()=>{
+  const finish={}
+  api.defaults.adapter=c=>{calls.push(c);if(c.method==='patch')return new Promise(resolve=>{finish[c.url]=()=>resolve(response(c,{data:adminUser,message:'OLD-FINALLY'}))})
+    return Promise.resolve(response(c,{data:userDetail('active',Number(c.url.split('/').at(-1)))}))}
+  const view=await usersView('/admin/users/9');await confirmUserStatus(view);await view.router.push('/admin/users/10');await settle();await confirmUserStatus(view)
+  finish['/admin/users/9/status']();await settle();assert.equal(button(view,'確認變更會員狀態').props.disabled,true)
+  button(view,'確認變更會員狀態').props.onClick();await settle();assert.equal(mutations().length,2);assert.ok(!text(view.root).includes('OLD-FINALLY'))
+  finish['/admin/users/10/status']();await settle();userBoundary();view.app.unmount()
 })
