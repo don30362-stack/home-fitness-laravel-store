@@ -2,12 +2,17 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import axios from 'axios'
 import { getAdminCategories } from '@/services/adminCategoryService'
-import type { AdminCategory } from '@/types/adminCategory'
+import type { AdminCategory, AdminCategoryChild, AdminCategoryMutationResponse } from '@/types/adminCategory'
 import type { ApiErrorResponse } from '@/types/api'
+import CategoryForm from '@/components/admin/CategoryForm.vue'
 
 const categories = ref<AdminCategory[]>([])
 const loading = ref(false)
 const error = ref('')
+const success = ref('')
+const form = ref<{ category: AdminCategory | AdminCategoryChild | null; role: 'root' | 'child' } | null>(null)
+const formContext = ref(0)
+const formSubmitting = ref(false)
 let requestSequence = 0
 
 const loadCategories = async () => {
@@ -28,6 +33,23 @@ const loadCategories = async () => {
 }
 
 const statusLabel = (status: string) => status === 'active' ? '啟用' : status === 'inactive' ? '停用' : status
+const openForm = (role: 'root' | 'child', category: AdminCategory | AdminCategoryChild | null = null) => {
+  if (formSubmitting.value) return
+  formContext.value++
+  success.value = ''
+  form.value = { role, category }
+}
+const closeForm = () => {
+  if (formSubmitting.value) return
+  formContext.value++
+  form.value = null
+}
+const saved = async (response: AdminCategoryMutationResponse, context: number) => {
+  if (context !== formContext.value) return
+  success.value = response.message
+  closeForm()
+  await loadCategories()
+}
 onMounted(loadCategories)
 onBeforeUnmount(() => { requestSequence++ })
 </script>
@@ -35,6 +57,14 @@ onBeforeUnmount(() => { requestSequence++ })
 <template>
   <section aria-labelledby="category-management-title">
     <h1 id="category-management-title" class="h3 mb-4">商品分類管理</h1>
+    <div class="d-flex flex-wrap gap-2 mb-3">
+      <button type="button" class="btn btn-primary" :disabled="formSubmitting || loading || !!error" @click="openForm('root')">新增主分類</button>
+      <button type="button" class="btn btn-outline-primary" :disabled="formSubmitting || loading || !!error" @click="openForm('child')">新增子分類</button>
+    </div>
+    <p v-if="success" role="status" class="alert alert-success">{{ success }}</p>
+    <CategoryForm v-if="form" :key="formContext" :context="formContext" :categories="categories"
+      :category="form.category" :role="form.role" @saved="saved" @cancel="closeForm"
+      @submitting-change="formSubmitting = $event" />
     <p v-if="loading" role="status">分類載入中…</p>
     <div v-else-if="error" class="alert alert-danger" role="alert">
       <p class="mb-2">{{ error }}</p>
@@ -45,6 +75,7 @@ onBeforeUnmount(() => { requestSequence++ })
       <article v-for="category in categories" :key="category.id" class="card">
         <div class="card-header">
           <h2 class="h5 mb-2">{{ category.name }}</h2>
+          <button type="button" class="btn btn-sm btn-outline-secondary mb-2" :disabled="formSubmitting" @click="openForm('root', category)">編輯主分類</button>
           <div class="d-flex flex-wrap gap-3 small">
             <span>狀態：{{ statusLabel(category.status) }}</span>
             <span>排序：{{ category.sort_order }}</span>
@@ -54,6 +85,7 @@ onBeforeUnmount(() => { requestSequence++ })
         <ul v-if="category.children.length" class="list-group list-group-flush">
           <li v-for="child in category.children" :key="child.id" class="list-group-item">
             <h3 class="h6 mb-2">{{ child.name }}</h3>
+            <button type="button" class="btn btn-sm btn-outline-secondary mb-2" :disabled="formSubmitting" @click="openForm('child', child)">編輯子分類</button>
             <div class="d-flex flex-wrap gap-3 small">
               <span>狀態：{{ statusLabel(child.status) }}</span>
               <span>排序：{{ child.sort_order }}</span>

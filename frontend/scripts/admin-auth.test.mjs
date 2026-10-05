@@ -29,6 +29,7 @@ const adminViews = {
   ProductImageManager: '/src/components/admin/ProductImageManager.vue',
   InventoryManagementView: '/src/views/admin/InventoryManagementView.vue',
   CategoryManagementView: '/src/views/admin/CategoryManagementView.vue',
+  CategoryForm: '/src/components/admin/CategoryForm.vue',
 }
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', plugins: [{
   name: 'admin-test-sfc', enforce: 'pre',
@@ -1097,8 +1098,8 @@ test('分類頁取代placeholder，顯示兩態、排序、children/product coun
     assert.ok(text(main).includes(expected), expected)
   }
   assert.ok(!text(main).includes('尚未實作'))
-  assert.equal(find(main, el => el.type === 'button'), undefined, '正常唯讀畫面沒有mutation假按鈕')
-  assert.equal(find(main, el => el.type === 'form'), undefined, '不提供搜尋或分頁')
+  assert.ok(button(view, '新增主分類')); assert.ok(button(view, '新增子分類'))
+  assert.equal(find(main, el => el.type === 'form'), undefined, '未開表單時不提供搜尋或分頁')
   assertCategoryCalls(); view.app.unmount()
 })
 
@@ -1184,4 +1185,212 @@ test('分類protected URL重新開啟先restoreAdmin，再GET管理樹', async (
   assert.equal(view.router.currentRoute.value.name, 'admin-categories')
   assert.deepEqual(calls.map(c => c.url), ['/admin/me', '/admin/categories'])
   assert.ok(text(view.root).includes('管理根分類')); assertMemberUntouched(); view.app.unmount()
+})
+
+const categoryMutationRow = (payload, id = 20) => ({ id, parent_id: null, name: 'server category', status: 'active',
+  sort_order: 0, children_count: 0, product_count: 0, children: [], created_at: null, updated_at: null, ...payload })
+const categoryMutationAdapter = handler => async config => {
+  calls.push(config)
+  if (config.method === 'get') return response(config, { data: adminCategoryTree })
+  return handler(config)
+}
+const submitCategory = async view => {
+  const form = find(view.root, el => el.type === 'form' && el.props['aria-label'] === '分類維護表單')
+  assert.ok(form); form.props.onSubmit({ preventDefault() {} }); await settle()
+}
+const assertCategoryMutationBoundary = () => {
+  assert.ok(calls.every(c => /^\/admin\/categories(?:\/\d+)?$/.test(c.url) && ['get', 'post', 'patch'].includes(c.method)))
+  assertMemberUntouched()
+}
+
+test('Category mutation service POST/PATCH data/message，無status API或DELETE', async () => {
+  api.defaults.adapter = categoryMutationAdapter(c => response(c,
+    { data: categoryMutationRow(JSON.parse(c.data)), message: 'backend success' }, c.method === 'post' ? 201 : 200))
+  const created = await categoryService.createAdminCategory({ name: 'root', status: 'inactive' })
+  const updated = await categoryService.updateAdminCategory(20, { name: 'edited', parent_id: 4, sort_order: 3 })
+  assert.equal(created.data.status, 'inactive'); assert.equal(updated.data.parent_id, 4)
+  assert.deepEqual(calls.map(c => [c.method, c.url]), [['post', '/admin/categories'], ['patch', '/admin/categories/20']])
+  assert.equal(updated.message, 'backend success'); assertCategoryMutationBoundary()
+})
+
+for (const [role, initialStatus] of [['root', 'active'], ['root', 'inactive'], ['child', 'active'], ['child', 'inactive']]) {
+  test(`Category create ${role}/${initialStatus}，role固定、parent只active、初始狀態與sort payload`, async () => {
+    let finish
+    api.defaults.adapter = categoryMutationAdapter(c => new Promise(resolve => {
+      finish = () => resolve(response(c, { data: categoryMutationRow(JSON.parse(c.data)), message: '建立成功' }, 201))
+    }))
+    const view = await categoriesView(); await click(view, role === 'root' ? '新增主分類' : '新增子分類')
+    assert.ok(text(view.root).includes('建立後不可變更'))
+    assert.equal(find(view.root, el => el.props.id === 'category-role'), undefined)
+    if (role === 'child') {
+      const parent = find(view.root, el => el.props.id === 'category-parent')
+      assert.deepEqual(parent.options.map(option => option.value), ['', 4])
+      await inputValue(view, 'category-parent', '4')
+    } else assert.equal(find(view.root, el => el.props.id === 'category-parent'), undefined)
+    const initialStatusSelect = find(view.root, el => el.props.id === 'category-initial-status')
+    assert.equal(initialStatusSelect.options[initialStatusSelect.selectedIndex].value, 'active')
+    await inputValue(view, 'category-name', '  新分類  '); await inputValue(view, 'category-sort', '7')
+    await inputValue(view, 'category-initial-status', initialStatus); await submitCategory(view)
+    assert.equal(button(view, '儲存中…').props.disabled, true)
+    await submitCategory(view); assert.equal(mutations().length, 1)
+    assert.deepEqual(JSON.parse(mutations()[0].data), { name: '新分類', parent_id: role === 'root' ? null : 4, sort_order: 7, status: initialStatus })
+    assert.equal(calls.filter(c => c.method === 'get').length, 1, '成功前不刷新')
+    assert.ok(!text(view.root).includes('建立成功'), '沒有optimistic成功')
+    finish(); await settle()
+    assert.ok(text(view.root).includes('建立成功')); assert.equal(calls.filter(c => c.method === 'get').length, 2)
+    assert.equal(find(view.root, el => el.type === 'form'), undefined)
+    assertCategoryMutationBoundary(); view.app.unmount()
+  })
+}
+
+for (const role of ['root', 'child']) {
+  test(`Category edit ${role}：role固定、沒有status field，原inactive parent可顯示/保留`, async () => {
+    api.defaults.adapter = categoryMutationAdapter(c => response(c,
+      { data: categoryMutationRow(JSON.parse(c.data), role === 'root' ? 1 : 2), message: '更新成功' }))
+    const view = await categoriesView(); await click(view, role === 'root' ? '編輯主分類' : '編輯子分類')
+    assert.equal(find(view.root, el => el.props.id === 'category-initial-status'), undefined)
+    assert.ok(text(view.root).includes('建立後不可變更'))
+    if (role === 'child') {
+      const parent = find(view.root, el => el.props.id === 'category-parent')
+      assert.equal(parent.options[parent.selectedIndex].value, 1); assert.deepEqual(parent.options.map(option => option.value), ['', 1, 4])
+      assert.ok(text(parent).includes('目前停用，可保留'))
+    }
+    await inputValue(view, 'category-name', '改名'); await inputValue(view, 'category-sort', '6'); await submitCategory(view)
+    assert.deepEqual(JSON.parse(mutations()[0].data), { name: '改名', parent_id: role === 'root' ? null : 1, sort_order: 6 })
+    assert.equal(mutations()[0].url, '/admin/categories/' + (role === 'root' ? 1 : 2))
+    assertCategoryMutationBoundary(); view.app.unmount()
+  })
+}
+
+test('Category child reparent active root：不列其他inactive root，送目標parent', async () => {
+  api.defaults.adapter = async c => { calls.push(c); return response(c, c.method === 'get'
+    ? { data: [...adminCategoryTree, { ...adminCategoryTree[1], id: 8, status: 'inactive', name: '不可新選' }] }
+    : { data: categoryMutationRow(JSON.parse(c.data), 2), message: '搬移成功' }) }
+  const view = await categoriesView(); await click(view, '編輯子分類')
+  const parent = find(view.root, el => el.props.id === 'category-parent')
+  assert.deepEqual(parent.options.map(option => option.value), ['', 1, 4])
+  await inputValue(view, 'category-parent', '4'); await submitCategory(view)
+  assert.equal(JSON.parse(mutations()[0].data).parent_id, 4)
+  assertCategoryMutationBoundary(); view.app.unmount()
+})
+
+for (const [role, field, reason] of [['root', 'name', '主分類名稱重複'], ['child', 'name', '兄弟分類名稱重複'], ['child', 'parent_id', '層級不合法']]) {
+  test(`Category 422 ${reason}：保留表單/draft，不假成功或重送`, async () => {
+    api.defaults.adapter = categoryMutationAdapter(c => {
+      const error = failure(c, 422); error.response.data.errors = { [field]: [reason] }; throw error
+    })
+    const view = await categoriesView(); await click(view, role === 'root' ? '新增主分類' : '新增子分類')
+    await inputValue(view, 'category-name', '保留草稿'); if (role === 'child') await inputValue(view, 'category-parent', '4')
+    await submitCategory(view)
+    assert.ok(text(view.root).includes(reason)); assert.equal(find(view.root, el => el.props.id === 'category-name').value, '保留草稿')
+    assert.equal(mutations().length, 1); assert.equal(calls.filter(c => c.method === 'get').length, 1)
+    assertCategoryMutationBoundary(); view.app.unmount()
+  })
+}
+
+for (const status of [403, 419, undefined, 500]) {
+  test(`Category mutation ${status ?? 'network'}：保留Admin/member/cart/draft，不自動重送`, async () => {
+    api.defaults.adapter = categoryMutationAdapter(c => Promise.reject(failure(c, status)))
+    const view = await categoriesView(); await click(view, '編輯子分類'); await inputValue(view, 'category-name', '草稿')
+    await submitCategory(view)
+    assert.ok(find(view.root, el => el.props.role === 'alert')); assert.equal(auth.currentAdmin.id, admin.id)
+    assert.equal(auth.adminFailureReason, null); assert.equal(view.router.currentRoute.value.name, 'admin-categories')
+    assert.equal(mutations().length, 1); assert.equal(find(view.root, el => el.props.id === 'category-name').value, '草稿')
+    assertCategoryMutationBoundary(); view.app.unmount()
+  })
+}
+
+for (const [status, code] of [[401, undefined], [403, 'ADMIN_ACCOUNT_DISABLED']]) {
+  test(`Category mutation ${status}/${code ?? ''}：沿用Admin coordinator，member隔離`, async () => {
+    api.defaults.adapter = categoryMutationAdapter(c => Promise.reject(failure(c, status, code)))
+    const view = await categoriesView(); await click(view, '新增主分類'); await inputValue(view, 'category-name', 'draft')
+    await submitCategory(view); await settle()
+    assert.equal(view.router.currentRoute.value.name, 'admin-login'); assert.equal(auth.currentAdmin, null)
+    assert.equal(mutations().length, 1); assertCategoryMutationBoundary(); view.app.unmount()
+  })
+}
+
+for (const method of ['post', 'patch']) for (const outcome of ['success', 'failure']) {
+  test(`Category pending ${method}/${outcome}：禁止同頁context切換，完成才刷新或保留draft`, async () => {
+    let finish, completed = false
+    api.defaults.adapter = c => {
+      calls.push(c)
+      if (c.method === 'get') return Promise.resolve(response(c, { data: completed
+        ? [{ ...adminCategoryTree[0], name: '權威新樹' }, adminCategoryTree[1]] : adminCategoryTree }))
+      return new Promise((resolve, reject) => {
+        finish = () => {
+          completed = outcome === 'success'
+          if (completed) resolve(response(c, { data: categoryMutationRow({ name: 'backend name' }), message: '儲存成功' }))
+          else { const error = failure(c, 422); error.response.data.errors = { name: ['後端拒絕原因'] }; reject(error) }
+        }
+      })
+    }
+    const view = await categoriesView(); await click(view, method === 'post' ? '新增主分類' : '編輯主分類')
+    await inputValue(view, 'category-name', '保留草稿')
+    const originalForm = find(view.root, el => el.type === 'form')
+    await submitCategory(view)
+    assert.equal(button(view, '儲存中…').props.disabled, true)
+    const controls = []
+    const collect = el => {
+      if (el.type === 'button' && ['放棄', '新增主分類', '新增子分類', '編輯主分類', '編輯子分類'].includes(text(el).trim())) controls.push(el)
+      el.children.forEach(collect)
+    }
+    collect(view.root)
+    assert.equal(controls.length, 7, '含所有root/child edit controls')
+    for (const control of controls) {
+      assert.equal(control.props.disabled, true)
+      // 直接呼叫handler，另外驗證程式防線，不只依賴瀏覽器disabled。
+      control.props.onClick(); await settle()
+      assert.equal(find(view.root, el => el.type === 'form'), originalForm)
+      assert.equal(find(view.root, el => el.props.id === 'category-name').value, '保留草稿')
+    }
+    // 直接模擬 child emit(cancel)，驗 parent closeForm 的防線。
+    const findComponent = vnode => {
+      if (!vnode || typeof vnode !== 'object') return undefined
+      if (typeof vnode.component?.props.context === 'number' && ['root', 'child'].includes(vnode.component.props.role)) return vnode.component
+      return findComponent(vnode.component?.subTree) || (Array.isArray(vnode.children)
+        ? vnode.children.map(findComponent).find(Boolean) : undefined)
+    }
+    const formComponent = findComponent(view.app._instance.subTree)
+    assert.ok(formComponent); formComponent.emit('cancel'); await settle()
+    assert.equal(find(view.root, el => el.type === 'form'), originalForm)
+    await submitCategory(view)
+    assert.equal(mutations().length, 1); assert.equal(mutations()[0].method, method)
+    assert.equal(calls.filter(c => c.method === 'get').length, 1)
+    assert.ok(!text(view.root).includes('權威新樹')); assert.ok(!text(view.root).includes('儲存成功'))
+    finish(); await settle()
+    if (outcome === 'success') {
+      assert.equal(find(view.root, el => el.type === 'form'), undefined)
+      assert.equal(calls.filter(c => c.method === 'get').length, 2)
+      assert.ok(text(view.root).includes('權威新樹')); assert.ok(text(view.root).includes('儲存成功'))
+    } else {
+      assert.equal(find(view.root, el => el.type === 'form'), originalForm)
+      assert.equal(find(view.root, el => el.props.id === 'category-name').value, '保留草稿')
+      assert.ok(text(view.root).includes('後端拒絕原因')); assert.equal(button(view, '儲存分類').props.disabled, false)
+      assert.equal(button(view, '放棄').props.disabled, false)
+      assert.equal(calls.filter(c => c.method === 'get').length, 1)
+    }
+    for (const label of ['新增主分類', '新增子分類', '編輯主分類', '編輯子分類']) assert.equal(button(view, label).props.disabled, false)
+    assert.equal(mutations().length, 1); assertCategoryMutationBoundary(); view.app.unmount()
+  })
+}
+
+test('Category mutation離頁後晚到success不導航、不刷新、不污染另一模組', async () => {
+  let finish
+  api.defaults.adapter = categoryMutationAdapter(c => new Promise(resolve => {
+    finish = () => resolve(response(c, { data: categoryMutationRow({}), message: '舊成功' }))
+  }))
+  const view = await categoriesView(); await click(view, '新增主分類'); await inputValue(view, 'category-name', 'draft'); await submitCategory(view)
+  await view.router.push('/admin/orders'); await settle(); const count = calls.length
+  finish(); await settle()
+  assert.equal(view.router.currentRoute.value.name, 'admin-orders'); assert.ok(!text(view.root).includes('舊成功'))
+  assert.equal(calls.length, count); assertCategoryMutationBoundary(); view.app.unmount()
+})
+
+test('Category表單blank/negative sort/未選parent拒絕，放棄不送mutation', async () => {
+  const view = await categoriesView(); await click(view, '新增子分類'); await inputValue(view, 'category-name', ' ')
+  await inputValue(view, 'category-sort', '-1'); await submitCategory(view)
+  for (const reason of ['請輸入分類名稱', '非負整數', '請選擇主分類']) assert.ok(text(view.root).includes(reason))
+  assert.equal(mutations().length, 0); await click(view, '放棄'); assert.equal(find(view.root, el => el.type === 'form'), undefined)
+  assertCategoryMutationBoundary(); view.app.unmount()
 })

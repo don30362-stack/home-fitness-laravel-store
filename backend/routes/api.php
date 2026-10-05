@@ -53,6 +53,8 @@ Route::prefix('admin')->group(function () {
         Route::get('/me', [AdminAuthController::class, 'me'])->middleware('admin.active');
         Route::middleware('admin.active')->group(function () {
             Route::get('/categories', [AdminCategoryController::class, 'index']);
+            Route::post('/categories', [AdminCategoryController::class, 'store']);
+            Route::patch('/categories/{id}', [AdminCategoryController::class, 'update'])->whereNumber('id');
             Route::get('/inventory', [AdminInventoryController::class, 'index']);
             Route::patch('/inventory/variants/{variantId}', [AdminInventoryController::class, 'adjustVariant'])->whereNumber('variantId');
             Route::patch('/inventory/{productId}', [AdminInventoryController::class, 'adjustProduct'])->whereNumber('productId');
