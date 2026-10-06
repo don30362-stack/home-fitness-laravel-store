@@ -26,6 +26,8 @@ use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ProfileController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CityController;
+use App\Http\Controllers\Api\BannerController;
+use App\Http\Controllers\Api\RecommendedProductController;
 use App\Models\City;
 
 Route::get('/test', function () {
@@ -39,6 +41,8 @@ Route::get('/products/{id}/related', [ProductController::class, 'related']);
 Route::get('/products/{id}', [ProductController::class, 'show']);
 
 Route::get('/categories', [CategoryController::class, 'index']);
+Route::get('/banners', [BannerController::class, 'index']);
+Route::get('/recommended-products', [RecommendedProductController::class, 'index']);
 
 Route::get('/cities', [CityController::class, 'index']);
 Route::get('/cities/{cityId}/districts', [CityController::class, 'districts'])
