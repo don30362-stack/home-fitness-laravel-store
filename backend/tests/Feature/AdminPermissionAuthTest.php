@@ -183,6 +183,6 @@ class AdminPermissionAuthTest extends TestCase
                 $count++;
             }
         }
-        $this->assertSame(36, $count);
+        $this->assertSame(43, $count);
     }
 }

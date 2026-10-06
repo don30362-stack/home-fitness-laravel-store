@@ -21,10 +21,11 @@ class AdminPermissionRouteMappingTest extends TestCase
         $this->seed(PermissionSeeder::class);
     }
 
-    // Inventory of the existing 36 real business routes, not inferred from middleware under test.
+    // Inventory of the 43 real business routes, not inferred from middleware under test.
     public static function mapping(): array
     {
         $groups = [
+            'admin_manage' => ['GET admins', 'POST admins', 'GET admins/{id}', 'PATCH admins/{id}', 'PATCH admins/{id}/status', 'GET permissions', 'PUT admins/{id}/permissions'],
             'product_manage' => ['GET products/{id}', 'POST products', 'PATCH products/{id}', 'PATCH products/{id}/status', 'DELETE products/{id}', 'POST products/{productId}/images', 'PATCH product-images/{imageId}', 'DELETE product-images/{imageId}'],
             'product_manage,home_content_manage' => ['GET products'],
             'category_manage' => ['GET categories', 'POST categories', 'PATCH categories/{id}', 'PATCH categories/{id}/status', 'DELETE categories/{id}'],
@@ -59,8 +60,8 @@ class AdminPermissionRouteMappingTest extends TestCase
         }
         $expected = self::mapping(); ksort($actual); ksort($expected);
         $this->assertSame($expected, $actual);
-        $this->assertCount(36, $actual);
-        $this->assertCount(74, Route::getRoutes());
+        $this->assertCount(43, $actual);
+        $this->assertCount(81, Route::getRoutes());
     }
 
     #[DataProvider('mapping')]
@@ -71,7 +72,7 @@ class AdminPermissionRouteMappingTest extends TestCase
         $member = User::factory()->create(['status' => 'disabled']);
         $cart = $member->cart()->create();
         $admin = Admin::factory()->create();
-        $admin->permissions()->attach(Permission::where('code', 'admin_manage')->value('id'));
+        $admin->permissions()->attach(Permission::where('code', $codes === 'admin_manage' ? 'product_manage' : 'admin_manage')->value('id'));
         $before = DB::table('admin_permission')->get()->toArray();
         $this->actingAs($member, 'web')->actingAs($admin, 'admin')->withSession(['cart_marker' => 'keep'])
             ->json($method, '/api/admin/'.$path, [])->assertForbidden()

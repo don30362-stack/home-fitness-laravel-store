@@ -22,6 +22,7 @@ globalThis.localStorage = {
 const adminViews = {
   AdminLoginView: '/src/views/admin/AdminLoginView.vue', AdminLayout: '/src/layouts/AdminLayout.vue',
   AdminForbiddenView: '/src/views/admin/AdminForbiddenView.vue',
+  AdminManagementView: '/src/views/admin/AdminManagementView.vue',
   AdminSidebar: '/src/components/admin/AdminSidebar.vue', AdminHeader: '/src/components/admin/AdminHeader.vue',
   AdminPlaceholderView: '/src/views/admin/AdminPlaceholderView.vue', AdminNotFoundView: '/src/views/admin/AdminNotFoundView.vue',
   ProductManagementView: '/src/views/admin/ProductManagementView.vue', AdminProductDetailView: '/src/views/admin/AdminProductDetailView.vue',
@@ -70,6 +71,7 @@ const categoryService = await server.ssrLoadModule('/src/services/adminCategoryS
 const orderService = await server.ssrLoadModule('/src/services/adminOrderService.ts')
 const userService = await server.ssrLoadModule('/src/services/adminUserService.ts')
 const bannerService = await server.ssrLoadModule('/src/services/adminHomeContentService.ts')
+const managementService = await server.ssrLoadModule('/src/services/adminManagementService.ts')
 const originalError = console.error
 console.error = () => {}
 after(async () => { console.error = originalError; await server.close() })
@@ -133,6 +135,7 @@ beforeEach(() => {
   memberApi.defaults.adapter = async (config) => response(config, { data: user })
   api.defaults.adapter = async (config) => {
     calls.push(config)
+    if (config.url === '/admin/admins' || config.url === '/admin/permissions') return response(config, { data: [] })
     if (config.url === '/categories') return response(config, { data: categoryOptions })
     if (config.url === '/admin/categories') return response(config, { data: adminCategoryTree })
     if (config.url === '/admin/banners') return response(config, { data: [] })
@@ -798,11 +801,11 @@ test('Admin-only 八模組保持階段對照，products／inventory／categories
     await view.router.push('/admin/' + item.path); await settle()
     const main = find(view.root, (el) => el.type === 'main')
     assert.ok(text(main).includes(item.title))
-    if (['products', 'inventory', 'categories', 'orders', 'users', 'home-content'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
+    if (['products', 'inventory', 'categories', 'orders', 'users', 'home-content', 'admins'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
     else { assert.ok(text(main).includes('尚未實作')); assert.ok(text(main).includes('Stage ' + item.stage)) }
   }
   assert.deepEqual(routes.adminModules.map((item) => item.stage), [24, 19, 20, 19, 21, 21, 22, 23])
-  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/banners', '/admin/categories', '/admin/inventory', '/admin/orders', '/admin/products', '/admin/recommended-products', '/admin/users', '/categories', '/categories']); assert.equal(member.currentUser, null)
+  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/admins', '/admin/banners', '/admin/categories', '/admin/inventory', '/admin/orders', '/admin/permissions', '/admin/products', '/admin/recommended-products', '/admin/users', '/categories', '/categories']); assert.equal(member.currentUser, null)
   const frontLink = find(view.root, (el) => el.type === 'a' && el.props.href === '/')
   assert.ok(frontLink); assert.equal(frontLink.props.onClick, undefined)
   const menu = find(view.root, (el) => el.type === 'button' && text(el) === '選單')
@@ -2631,4 +2634,211 @@ test('Manual permission refresh updates grants without returning automatically; 
  assert.ok(find(view.root,el=>el.type==='a' && el.props.href==='/admin/inventory'))
  assert.equal(calls.length,1);await view.router.push('/admin/inventory');await settle()
  assert.equal(view.router.currentRoute.value.name,'admin-inventory');assertMemberUntouched();view.app.unmount()
+})
+// Stage 23 Step 3: SFC memory renderer + Admin Axios transport, not browser acceptance.
+const managedCatalog = ['admin_manage','category_manage','home_content_manage','inventory_manage','member_manage','order_manage','product_manage'].map((code,i)=>({id:i+1,code,name:code}))
+const managedRow = (id=2) => ({id,name:'帳號'+id,email:`managed${id}@example.test`,status:'active',created_at:null,updated_at:null,permissions:[managedCatalog[6]]})
+const managementView = async () => { auth.isAdminInitialized=true;auth.currentAdmin={...admin,permissions:['admin_manage']};return mountRoute('/admin/admins') }
+const managementAdapter = (handler, reads) => async c => {
+ calls.push(c)
+ if(c.method!=='get') return handler ? handler(c) : response(c,{data:managedRow(),message:'權威成功'})
+ if(reads) {const result=await reads(c);if(result)return result}
+ if(c.url==='/admin/admins')return response(c,{data:[managedRow(1),managedRow(2)]})
+ if(c.url==='/admin/permissions')return response(c,{data:managedCatalog})
+ if(c.url==='/admin/me')return response(c,{data:{...admin,permissions:['admin_manage']}})
+ return response(c,{data:managedRow(Number(c.url.split('/').at(-1)))})
+}
+const submitManaged = async (view,id) => {find(view.root,el=>el.props.id===id).props.onSubmit({preventDefault(){}});await settle()}
+const openManaged = async view => {await click(view,'查看 帳號2')}
+const fillManaged = async view => {for(const [id,value] of [['managed-name','草稿'],['managed-email','draft@example.test'],['managed-password','test-only-password'],['managed-confirmation','test-only-password']])await inputValue(view,id,value)}
+const checkManaged = async (view,id,checked) => {find(view.root,el=>el.props.id==='managed-permission-'+id).props.onChange({target:{checked}});await settle()}
+
+test('Management service exact seven APIs use adminApi and isolated payloads',async()=>{
+ api.defaults.adapter=managementAdapter()
+ await managementService.getManagedAdmins();await managementService.getAdminPermissionCatalog();await managementService.getManagedAdmin(2)
+ await managementService.createManagedAdmin({name:'New',email:'new@example.test',password:'test-only-password',password_confirmation:'test-only-password'})
+ await managementService.updateManagedAdmin(2,{name:'Edit'})
+ await managementService.updateManagedAdminStatus(2,{status:'disabled'})
+ await managementService.replaceManagedAdminPermissions(2,{permission_ids:[]})
+ assert.deepEqual(calls.map(c=>[c.method,c.url]),[['get','/admin/admins'],['get','/admin/permissions'],['get','/admin/admins/2'],['post','/admin/admins'],['patch','/admin/admins/2'],['patch','/admin/admins/2/status'],['put','/admin/admins/2/permissions']])
+ assertMemberUntouched()
+})
+test('Management mounts real full list, exact seven checkboxes and separate basic/status/permissions controls',async()=>{
+ api.defaults.adapter=managementAdapter();const view=await managementView();await openManaged(view)
+ assert.ok(!text(view.root).includes('尚未實作'));assert.ok(text(view.root).includes('managed2@example.test'))
+ for(const option of managedCatalog)assert.ok(find(view.root,el=>el.props.id==='managed-permission-'+option.id))
+ assert.equal(find(view.root,el=>el.props.id==='managed-password'),undefined)
+ assertMemberUntouched();view.app.unmount()
+})
+for(const section of ['list','catalog','detail'])test(`Management ${section} loading/failure independently retains other sections, manual GET retry`,async()=>{
+ let bad=true,finish
+ api.defaults.adapter=managementAdapter(undefined,c=>{
+  if(c.url===(section==='list'?'/admin/admins':section==='catalog'?'/admin/permissions':'/admin/admins/2')&&bad)return new Promise((resolve,reject)=>{finish=()=>reject(failure(c,503))})
+ })
+ const view=await managementView()
+ if(section==='detail')await openManaged(view)
+ assert.ok(text(view.root).includes('載入'));finish();await settle()
+ assert.ok(text(view.root).includes('失敗'))
+ bad=false;await click(view,section==='list'?'重試列表':section==='catalog'?'重試權限目錄':'重試詳細')
+ assert.ok(!text(view.root).includes('失敗'));assert.equal(mutations().length,0);view.app.unmount()
+})
+for(const initialStatus of ['active','disabled'])test(`Management create ${initialStatus} pending locks contexts, one POST then authoritative list, no optimistic`,async()=>{
+ let finish,created=false
+ api.defaults.adapter=managementAdapter(c=>new Promise(resolve=>{finish=()=>{created=true;resolve(response(c,{data:managedRow(3),message:'建立成功'}))}}),c=>c.url==='/admin/admins'?response(c,{data:created?[managedRow(3)]:[managedRow(2)]}):undefined)
+ const view=await managementView();await click(view,'新增管理員');await fillManaged(view);await inputValue(view,'managed-status',initialStatus)
+ await submitManaged(view,'managed-admin-create');await submitManaged(view,'managed-admin-create')
+ for(const label of ['新增管理員','放棄','查看 帳號2','建立管理員'])assert.equal(button(view,label).props.disabled,true,label)
+ await click(view,'放棄');await click(view,'查看 帳號2');assert.ok(find(view.root,el=>el.props.id==='managed-admin-create'))
+ assert.equal(mutations().length,1);assert.equal(JSON.parse(mutations()[0].data).status,initialStatus);assert.ok(!text(view.root).includes('帳號3'))
+ finish();await settle();assert.ok(text(view.root).includes('建立成功'));assert.ok(text(view.root).includes('帳號3'));assert.equal(find(view.root,el=>el.props.id==='managed-password'),undefined)
+ assertMemberUntouched();view.app.unmount()
+})
+for(const kind of ['basic','status','permissions'])test(`Management ${kind} exact payload, pending mutual exclusion, backend refresh, no unnecessary me`,async()=>{
+ let finish,changed=false
+ api.defaults.adapter=managementAdapter(c=>new Promise(resolve=>{finish=()=>{changed=true;resolve(response(c,{data:managedRow(),message:'修改成功'}))}}),c=>c.url==='/admin/admins/2'?response(c,{data:{...managedRow(),name:changed?'權威更新':'帳號2',status:changed&&kind==='status'?'disabled':'active',permissions:changed&&kind==='permissions'?[]:[managedCatalog[6]]}}):undefined)
+ const view=await managementView();await openManaged(view)
+ if(kind==='basic'){await inputValue(view,'managed-edit-name','編輯草稿');await submitManaged(view,'managed-admin-basic')}
+ if(kind==='status'){await click(view,'停用帳號');assert.ok(text(view.root).includes('至少保留一位'));await click(view,'確認變更狀態')}
+ if(kind==='permissions'){await checkManaged(view,7,false);await click(view,'儲存功能權限')}
+ for(const label of ['新增管理員','儲存基本資料','停用帳號','儲存功能權限'])assert.equal(button(view,label).props.disabled,true)
+ await click(view,'儲存功能權限');await submitManaged(view,'managed-admin-basic');assert.equal(mutations().length,1)
+ const mutation=mutations()[0];assert.equal(mutation.method,kind==='permissions'?'put':'patch')
+ assert.deepEqual(JSON.parse(mutation.data),kind==='basic'?{name:'編輯草稿',email:'managed2@example.test'}:kind==='status'?{status:'disabled'}:{permission_ids:[]})
+ assert.ok(!text(view.root).includes('權威更新'));finish();await settle();assert.ok(text(view.root).includes('修改成功'));assert.ok(text(view.root).includes('權威更新'))
+ assert.equal(calls.filter(c=>c.url==='/admin/me').length,0);assertMemberUntouched();view.app.unmount()
+})
+for(const kind of ['create','basic','status','permissions'])for(const [status,code] of [[422,undefined],[403,undefined],[419,undefined],[500,undefined],[undefined,undefined],[401,undefined],[403,'ADMIN_ACCOUNT_DISABLED']])test(`Management ${kind} ${status??'network'} ${code??''} failure not optimistic/retried; member isolated`,async()=>{
+ api.defaults.adapter=managementAdapter(c=>{const err=failure(c,status,code);if(status===422)err.response.data={message:'後端保護原因',errors:{name:['欄位保留原因']}};throw err})
+ const view=await managementView()
+ if(kind==='create'){await click(view,'新增管理員');await fillManaged(view);await submitManaged(view,'managed-admin-create')}
+ else {await openManaged(view);if(kind==='basic'){await inputValue(view,'managed-edit-name','編輯草稿');await submitManaged(view,'managed-admin-basic')}
+  if(kind==='status'){await click(view,'停用帳號');await click(view,'確認變更狀態')}
+  if(kind==='permissions')await click(view,'儲存功能權限')}
+ assert.equal(mutations().length,1)
+ if(status===401||code==='ADMIN_ACCOUNT_DISABLED'){assert.equal(auth.currentAdmin,null);assert.equal(view.router.currentRoute.value.name,'admin-login')}
+ else {assert.equal(auth.currentAdmin.id,1);assert.equal(view.router.currentRoute.value.path,'/admin/admins');assert.equal(button(view,'新增管理員').props.disabled,false);if(status===422)assert.ok(text(view.root).includes('欄位保留原因'));if(kind==='basic')assert.equal(find(view.root,el=>el.props.id==='managed-edit-name').value,'編輯草稿')}
+ assertMemberUntouched();view.app.unmount()
+})
+for(const section of ['list','detail'])test(`Management successful mutation then ${section} GET failure preserves success, blocks mutation, retry GET only`,async()=>{
+ let changed=false,bad=true
+ api.defaults.adapter=managementAdapter(c=>{changed=true;return response(c,{data:managedRow(),message:'已成功儲存'})},c=>{if(changed&&bad&&c.url===(section==='list'?'/admin/admins':'/admin/admins/2'))throw failure(c,503)})
+ const view=await managementView();await openManaged(view);await submitManaged(view,'managed-admin-basic')
+ assert.ok(text(view.root).includes('已成功儲存'));assert.ok(text(view.root).includes('重新載入失敗'));assert.equal(button(view,'儲存基本資料').props.disabled,true)
+ await submitManaged(view,'managed-admin-basic');assert.equal(mutations().length,1)
+ bad=false;await click(view,section==='list'?'重試列表':'重試詳細');assert.equal(mutations().length,1);assert.equal(button(view,'儲存基本資料').props.disabled,false);view.app.unmount()
+})
+test('Management self basic refreshes me/header; temporary identity failure retains success and manual retry only me',async()=>{
+ let saved=false,bad=true
+ api.defaults.adapter=managementAdapter(c=>{saved=true;return response(c,{message:'本人基本資料已儲存'})},c=>{if(c.url==='/admin/me'){if(bad)throw failure(c,503);return response(c,{data:{...admin,name:'SELF-NEW',permissions:['admin_manage']}})}})
+ const view=await managementView();await click(view,'查看 帳號1');await inputValue(view,'managed-edit-name','SELF-NEW');await submitManaged(view,'managed-admin-basic')
+ assert.ok(saved);assert.ok(text(view.root).includes('本人基本資料已儲存'));assert.ok(text(view.root).includes('身分重新載入失敗'));assert.equal(auth.currentAdmin.name,admin.name)
+ const before=calls.length;bad=false;await click(view,'重試目前身分');assert.deepEqual(calls.slice(before).map(c=>[c.method,c.url]),[['get','/admin/me']]);assert.equal(auth.currentAdmin.name,'SELF-NEW');assert.equal(mutations().length,1);assertMemberUntouched();view.app.unmount()
+})
+for(const keep of [true,false])test(`Management self permissions refresh me first; keep=${keep} updates identity/sidebar and safe route`,async()=>{
+ api.defaults.adapter=managementAdapter(undefined,c=>c.url==='/admin/me'?response(c,{data:{...admin,permissions:keep?['admin_manage']:[]}}):undefined)
+ const view=await managementView();await click(view,'查看 帳號1');await click(view,'儲存功能權限')
+ const index=calls.findIndex(c=>c.method==='put');assert.equal(calls[index+1].url,'/admin/me')
+ assert.equal(view.router.currentRoute.value.name,keep?'admin-admins':'admin-forbidden');assert.equal(Boolean(find(view.root,el=>el.type==='a'&&el.props.href==='/admin/admins')),keep)
+ assert.equal(mutations().length,1);assertMemberUntouched();view.app.unmount()
+})
+test('Management self disabled uses existing me coordinator to Login while preserving member/cart',async()=>{
+ api.defaults.adapter=managementAdapter(undefined,c=>{if(c.url==='/admin/me')throw failure(c,403,'ADMIN_ACCOUNT_DISABLED')})
+ const view=await managementView();await click(view,'查看 帳號1');await click(view,'停用帳號');await click(view,'確認變更狀態')
+ assert.equal(view.router.currentRoute.value.name,'admin-login');assert.equal(auth.currentAdmin,null);assert.equal(mutations().length,1);assertMemberUntouched();view.app.unmount()
+})
+for(const outcome of ['success','error'])for(const phase of ['mutation','refresh'])test(`Management route leave late ${phase} ${outcome} cannot pollute next module`,async()=>{
+ let finish,changed=false
+ api.defaults.adapter=managementAdapter(c=>{changed=true;if(phase==='refresh')return response(c,{message:'OLD-SUCCESS'});return new Promise((resolve,reject)=>{finish=()=>outcome==='success'?resolve(response(c,{message:'OLD-SUCCESS'})):reject(failure(c,422))})},c=>{if(phase==='refresh'&&changed&&c.url==='/admin/admins/2')return new Promise((resolve,reject)=>{finish=()=>outcome==='success'?resolve(response(c,{data:{...managedRow(),name:'OLD-DATA'}})):reject(failure(c,503))})})
+ const view=await managementView();await openManaged(view);await submitManaged(view,'managed-admin-basic');await view.router.push('/admin/dashboard');await settle();finish();await settle()
+ assert.equal(view.router.currentRoute.value.name,'admin-dashboard');for(const value of ['OLD-SUCCESS','OLD-DATA','重新載入失敗'])assert.ok(!text(view.root).includes(value));assert.equal(mutations().length,1);assertMemberUntouched();view.app.unmount()
+})
+test('Management switched detail ignores older late response',async()=>{
+ let finish
+ api.defaults.adapter=managementAdapter(undefined,c=>c.url==='/admin/admins/2'?new Promise(resolve=>{finish=()=>resolve(response(c,{data:{...managedRow(),name:'OLD-DETAIL'}}))}):undefined)
+ const view=await managementView();await openManaged(view);await click(view,'查看 帳號1');finish();await settle()
+ assert.ok(text(view.root).includes('帳號1 的管理資料'));assert.ok(!text(view.root).includes('OLD-DETAIL'));view.app.unmount()
+})
+test('Management empty list is explicit and creates no mutation',async()=>{
+ api.defaults.adapter=managementAdapter(undefined,c=>c.url==='/admin/admins'?response(c,{data:[]}):undefined)
+ const view=await managementView();assert.ok(text(view.root).includes('目前沒有管理員'));assert.equal(mutations().length,0);view.app.unmount()
+})
+test('Management invariant rejection restores authoritative permission checkboxes and displays backend reason',async()=>{
+ api.defaults.adapter=managementAdapter(c=>{const error=failure(c,422);error.response.data={message:'系統至少必須保留一位啟用的管理員管理者。',errors:{permission_ids:['最後管理者不可移除']}};throw error})
+ const view=await managementView();await openManaged(view);await checkManaged(view,7,false);await click(view,'儲存功能權限')
+ assert.ok(text(view.root).includes('最後管理者不可移除'));assert.equal(find(view.root,el=>el.props.id==='managed-permission-7').props.checked,true);assert.equal(mutations().length,1);view.app.unmount()
+})
+test('Management runtime admin_manage denial uses Step2 identity refresh and Forbidden without logout',async()=>{
+ api.defaults.adapter=managementAdapter(c=>{throw failure(c,403,'ADMIN_PERMISSION_DENIED')},c=>c.url==='/admin/me'?response(c,{data:{...admin,permissions:[]}}):undefined)
+ const view=await managementView();await openManaged(view);await submitManaged(view,'managed-admin-basic')
+ assert.equal(view.router.currentRoute.value.name,'admin-forbidden');assert.equal(auth.currentAdmin.id,admin.id);assert.deepEqual(auth.currentAdmin.permissions,[])
+ assert.equal(calls.filter(c=>c.url==='/admin/me').length,1);assert.equal(mutations().length,1);assertMemberUntouched();view.app.unmount()
+})
+for(const kind of ['create','status','permissions'])test(`Management ${kind} success+GET failure blocks mutations and retries only GET`,async()=>{
+ let changed=false,bad=true
+ api.defaults.adapter=managementAdapter(c=>{changed=true;return response(c,{data:managedRow(),message:'操作成功'})},c=>{if(changed&&bad&&c.url==='/admin/admins')throw failure(c,503)})
+ const view=await managementView()
+ if(kind==='create'){await click(view,'新增管理員');await fillManaged(view);await submitManaged(view,'managed-admin-create')}
+ else {await openManaged(view);if(kind==='status'){await click(view,'停用帳號');await click(view,'確認變更狀態')}else await click(view,'儲存功能權限')}
+ assert.ok(text(view.root).includes('操作成功'));assert.ok(text(view.root).includes('重新載入失敗'));assert.equal(button(view,'新增管理員').props.disabled,true)
+ bad=false;await click(view,'重試列表');assert.equal(mutations().length,1);assert.equal(button(view,'新增管理員').props.disabled,false);assertMemberUntouched();view.app.unmount()
+})
+// Step 3 review: an unconfirmed self identity stops subsequent management GETs.
+for (const action of ['revoke', 'disable']) test(`Management self ${action} success then me 503 waits for manual identity retry only`, async () => {
+ let changed = false, meRequests = 0
+ api.defaults.adapter = managementAdapter(c => {
+  changed = true
+  return response(c, { message: '本人操作已成功' })
+ }, c => {
+  if (c.url === '/admin/me') {
+   meRequests++
+   if (meRequests === 1) throw failure(c, 503)
+   if (action === 'disable') throw failure(c, 403, 'ADMIN_ACCOUNT_DISABLED')
+   return response(c, { data: { ...admin, permissions: [] } })
+  }
+  if (!changed && c.url === '/admin/admins/1') {
+   return response(c, { data: { ...managedRow(1), permissions: [managedCatalog[0], managedCatalog[6]] } })
+  }
+  // These endpoints would now deny access; they must not be requested automatically.
+  if (changed && c.url.startsWith('/admin/admins')) throw failure(c, 403, 'ADMIN_PERMISSION_DENIED')
+ })
+ const view = await managementView()
+ await click(view, '查看 帳號1')
+ const before = calls.length
+ if (action === 'revoke') {
+  await checkManaged(view, 1, false)
+  await click(view, '儲存功能權限')
+ } else {
+  await click(view, '停用帳號'); await click(view, '確認變更狀態')
+ }
+ await settle()
+ assert.deepEqual(calls.slice(before).map(c => [c.method, c.url]), [
+  [action === 'revoke' ? 'put' : 'patch', action === 'revoke' ? '/admin/admins/1/permissions' : '/admin/admins/1/status'],
+  ['get', '/admin/me'],
+ ])
+ assert.deepEqual(JSON.parse(mutations()[0].data), action === 'revoke' ? { permission_ids: [7] } : { status: 'disabled' })
+ assert.ok(text(view.root).includes('本人操作已成功'))
+ assert.ok(text(view.root).includes('身分重新載入失敗'))
+ assert.ok(text(view.root).includes('資料尚未重新確認'))
+ assert.equal(button(view, '新增管理員').props.disabled, true)
+ assert.equal(auth.currentAdmin.id, admin.id)
+ assert.deepEqual(auth.currentAdmin.permissions, ['admin_manage'])
+ assert.equal(view.router.currentRoute.value.name, 'admin-admins')
+ assert.equal(meRequests, 1); assert.equal(mutations().length, 1)
+ assertMemberUntouched()
+ const retryStart = calls.length
+ await click(view, '重試目前身分'); await settle()
+ assert.deepEqual(calls.slice(retryStart).map(c => [c.method, c.url]), [['get', '/admin/me']])
+ assert.equal(meRequests, 2); assert.equal(mutations().length, 1)
+ if (action === 'revoke') {
+  assert.equal(view.router.currentRoute.value.name, 'admin-forbidden')
+  assert.equal(auth.currentAdmin.id, admin.id)
+  assert.deepEqual(auth.currentAdmin.permissions, [])
+  assert.ok(!find(view.root, el => el.type === 'a' && el.props.href === '/admin/admins'))
+ } else {
+  assert.equal(view.router.currentRoute.value.name, 'admin-login')
+  assert.equal(auth.currentAdmin, null)
+  assert.equal(auth.adminFailureReason, 'disabled')
+ }
+ assert.ok(!calls.some(c => c.url === '/admin/logout'))
+ assertMemberUntouched(); view.app.unmount()
 })

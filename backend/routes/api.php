@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\CityController;
 use App\Http\Controllers\Api\BannerController;
 use App\Http\Controllers\Api\RecommendedProductController;
 use App\Models\City;
+use App\Http\Controllers\Api\AdminManagementController;
 
 Route::get('/test', function () {
     return response()->json([
@@ -60,6 +61,15 @@ Route::prefix('admin')->group(function () {
         Route::post('/logout', [AdminAuthController::class, 'logout']);
         Route::get('/me', [AdminAuthController::class, 'me'])->middleware('admin.active');
         Route::middleware('admin.active')->group(function () {
+            Route::middleware('admin.permission:admin_manage')->group(function () {
+                Route::get('/admins', [AdminManagementController::class, 'index']);
+                Route::post('/admins', [AdminManagementController::class, 'store']);
+                Route::get('/permissions', [AdminManagementController::class, 'catalog']);
+                Route::get('/admins/{id}', [AdminManagementController::class, 'show'])->whereNumber('id');
+                Route::patch('/admins/{id}', [AdminManagementController::class, 'update'])->whereNumber('id');
+                Route::patch('/admins/{id}/status', [AdminManagementController::class, 'status'])->whereNumber('id');
+                Route::put('/admins/{id}/permissions', [AdminManagementController::class, 'permissions'])->whereNumber('id');
+            });
             Route::get('/recommended-products', [AdminRecommendedProductController::class, 'index'])->middleware('admin.permission:home_content_manage');
             Route::post('/recommended-products', [AdminRecommendedProductController::class, 'store'])->middleware('admin.permission:home_content_manage');
             Route::patch('/recommended-products/order', [AdminRecommendedProductController::class, 'order'])->middleware('admin.permission:home_content_manage');

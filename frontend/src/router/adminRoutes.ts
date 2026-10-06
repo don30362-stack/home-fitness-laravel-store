@@ -18,6 +18,7 @@ import { setAdminNavigationCallbacks } from '@/services/adminSessionNavigation'
 
 import { adminModules } from './adminModules'
 export { adminModules } from './adminModules'
+import AdminManagementView from '@/views/admin/AdminManagementView.vue'
 import AdminForbiddenView from '@/views/admin/AdminForbiddenView.vue'
 import type { AdminPermissionCode } from '@/types/adminAuth'
 
@@ -44,8 +45,8 @@ export const adminRoutes: RouteRecordRaw[] = [
       { path: '', redirect: '/admin/dashboard' },
       ...adminModules.map((module) => ({
         path: module.path, name: 'admin-' + module.path,
-        component: module.path === 'products' ? ProductManagementView : module.path === 'inventory' ? InventoryManagementView : module.path === 'categories' ? CategoryManagementView : module.path === 'orders' ? OrderManagementView : module.path === 'users' ? MemberManagementView : module.path === 'home-content' ? HomeContentManagementView : AdminPlaceholderView,
-        props: ['products', 'inventory', 'categories', 'orders', 'users', 'home-content'].includes(module.path) ? undefined : { title: module.title, stage: module.stage }, meta: { requiresAdmin: true, adminPermission: module.permission },
+        component: module.path === 'products' ? ProductManagementView : module.path === 'inventory' ? InventoryManagementView : module.path === 'categories' ? CategoryManagementView : module.path === 'orders' ? OrderManagementView : module.path === 'users' ? MemberManagementView : module.path === 'home-content' ? HomeContentManagementView : module.path === 'admins' ? AdminManagementView : AdminPlaceholderView,
+        props: ['products', 'inventory', 'categories', 'orders', 'users', 'home-content', 'admins'].includes(module.path) ? undefined : { title: module.title, stage: module.stage }, meta: { requiresAdmin: true, adminPermission: module.permission },
       })),
       { path: 'products/new', name: 'admin-product-create', component: AdminProductFormView, meta: { requiresAdmin: true, adminPermission: 'product_manage' } },
       { path: 'products/:id/edit', name: 'admin-product-edit', component: AdminProductFormView, meta: { requiresAdmin: true, adminPermission: 'product_manage' } },
