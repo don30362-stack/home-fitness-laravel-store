@@ -191,3 +191,9 @@ onBeforeUnmount(() => { disposed = true; context++ })
     <p v-if="catalogError && !detail" class="alert alert-danger">{{ catalogError }} <button :disabled="pending || catalogLoading" @click="retry('catalog')">重試權限目錄</button></p>
   </section>
 </template>
+
+<style scoped>
+/* Keep names and actions readable; table-responsive provides local scrolling. */
+table { min-width: 640px; }
+th, td:first-child, td:last-child { white-space: nowrap; }
+</style>
