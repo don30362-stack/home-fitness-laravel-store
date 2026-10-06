@@ -12,6 +12,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AddressController;
 use App\Http\Controllers\Api\AdminAuthController;
+use App\Http\Controllers\Api\AdminBannerController;
 use App\Http\Controllers\Api\AdminCategoryController;
 use App\Http\Controllers\Api\AdminInventoryController;
 use App\Http\Controllers\Api\AdminOrderController;
@@ -58,6 +59,12 @@ Route::prefix('admin')->group(function () {
         Route::post('/logout', [AdminAuthController::class, 'logout']);
         Route::get('/me', [AdminAuthController::class, 'me'])->middleware('admin.active');
         Route::middleware('admin.active')->group(function () {
+            Route::get('/banners', [AdminBannerController::class, 'index']);
+            Route::post('/banners', [AdminBannerController::class, 'store']);
+            Route::patch('/banners/order', [AdminBannerController::class, 'order']);
+            Route::patch('/banners/{id}/status', [AdminBannerController::class, 'status'])->whereNumber('id');
+            Route::patch('/banners/{id}', [AdminBannerController::class, 'update'])->whereNumber('id');
+            Route::delete('/banners/{id}', [AdminBannerController::class, 'destroy'])->whereNumber('id');
             Route::get('/users', [AdminUserController::class, 'index']);
             Route::get('/users/{id}', [AdminUserController::class, 'show'])->whereNumber('id');
             Route::patch('/users/{id}/status', [AdminUserController::class, 'updateStatus'])->whereNumber('id');

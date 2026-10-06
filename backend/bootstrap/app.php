@@ -16,6 +16,8 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->statefulApi();
+        // Banner link validation must see controls before its own space-only trim.
+        $middleware->trimStrings(except: ['link_url']);
         $middleware->redirectGuestsTo(
             fn (Request $request) => $request->is('api/admin/*') ? null : route('login'),
         );

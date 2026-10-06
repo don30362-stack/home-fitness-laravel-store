@@ -7,6 +7,7 @@ import AdminNotFoundView from '@/views/admin/AdminNotFoundView.vue'
 import ProductManagementView from '@/views/admin/ProductManagementView.vue'
 import InventoryManagementView from '@/views/admin/InventoryManagementView.vue'
 import CategoryManagementView from '@/views/admin/CategoryManagementView.vue'
+import HomeContentManagementView from '@/views/admin/HomeContentManagementView.vue'
 import OrderManagementView from '@/views/admin/OrderManagementView.vue'
 import AdminOrderDetailView from '@/views/admin/AdminOrderDetailView.vue'
 import MemberManagementView from '@/views/admin/MemberManagementView.vue'
@@ -45,8 +46,8 @@ export const adminRoutes: RouteRecordRaw[] = [
       { path: '', redirect: '/admin/dashboard' },
       ...adminModules.map((module) => ({
         path: module.path, name: 'admin-' + module.path,
-        component: module.path === 'products' ? ProductManagementView : module.path === 'inventory' ? InventoryManagementView : module.path === 'categories' ? CategoryManagementView : module.path === 'orders' ? OrderManagementView : module.path === 'users' ? MemberManagementView : AdminPlaceholderView,
-        props: ['products', 'inventory', 'categories', 'orders', 'users'].includes(module.path) ? undefined : { title: module.title, stage: module.stage }, meta: { requiresAdmin: true },
+        component: module.path === 'products' ? ProductManagementView : module.path === 'inventory' ? InventoryManagementView : module.path === 'categories' ? CategoryManagementView : module.path === 'orders' ? OrderManagementView : module.path === 'users' ? MemberManagementView : module.path === 'home-content' ? HomeContentManagementView : AdminPlaceholderView,
+        props: ['products', 'inventory', 'categories', 'orders', 'users', 'home-content'].includes(module.path) ? undefined : { title: module.title, stage: module.stage }, meta: { requiresAdmin: true },
       })),
       { path: 'products/new', name: 'admin-product-create', component: AdminProductFormView, meta: { requiresAdmin: true } },
       { path: 'products/:id/edit', name: 'admin-product-edit', component: AdminProductFormView, meta: { requiresAdmin: true } },

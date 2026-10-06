@@ -29,6 +29,7 @@ const adminViews = {
   ProductImageManager: '/src/components/admin/ProductImageManager.vue',
   InventoryManagementView: '/src/views/admin/InventoryManagementView.vue',
   CategoryManagementView: '/src/views/admin/CategoryManagementView.vue',
+  HomeContentManagementView: '/src/views/admin/HomeContentManagementView.vue',
   CategoryForm: '/src/components/admin/CategoryForm.vue',
   OrderManagementView: '/src/views/admin/OrderManagementView.vue',
   AdminOrderDetailView: '/src/views/admin/AdminOrderDetailView.vue',
@@ -66,6 +67,7 @@ const inventoryService = await server.ssrLoadModule('/src/services/adminInventor
 const categoryService = await server.ssrLoadModule('/src/services/adminCategoryService.ts')
 const orderService = await server.ssrLoadModule('/src/services/adminOrderService.ts')
 const userService = await server.ssrLoadModule('/src/services/adminUserService.ts')
+const bannerService = await server.ssrLoadModule('/src/services/adminHomeContentService.ts')
 const originalError = console.error
 console.error = () => {}
 after(async () => { console.error = originalError; await server.close() })
@@ -131,6 +133,7 @@ beforeEach(() => {
     calls.push(config)
     if (config.url === '/categories') return response(config, { data: categoryOptions })
     if (config.url === '/admin/categories') return response(config, { data: adminCategoryTree })
+    if (config.url === '/admin/banners') return response(config, { data: [] })
     if (config.url === '/admin/orders') return response(config, adminOrderPage())
     if (config.url === '/admin/users') return response(config, userPage())
     if (/^\/admin\/users\/\d+$/.test(config.url)) return response(config, { data: userDetail('active', Number(config.url.split('/').at(-1)), [adminOrderSummary], Number(config.params?.order_page ?? 1)) })
@@ -145,6 +148,185 @@ const assertMemberUntouched = () => {
   assert.equal(member.currentUser.id, user.id); assert.ok(carts.memberCart)
   assert.equal(storage.get(key), guest); assert.equal(carts.guestItems.length, 1)
   assert.deepEqual(memberEvents, [])
+}
+
+// Stage22 Banner: real SFC + independent Admin transport, memory host only.
+const bannerRow = (id = 1, status = 'active') => ({ id, title: '輪播' + id, subtitle: '副標題',
+  image_url: `http://localhost/storage/banners/${id}.jpg`, button_text: '看商品', link_url: '/products',
+  sort_order: id - 1, status, created_at: null, updated_at: null })
+const bannerAdapter = (rows, handler = c => response(c, { data: bannerRow(), message: '輪播操作成功' })) => async c => {
+  calls.push(c)
+  return c.method === 'get' ? response(c, { data: typeof rows === 'function' ? rows() : rows }) : handler(c)
+}
+const bannersView = () => { auth.isAdminInitialized = true; return mountRoute('/admin/home-content') }
+const bannerFile = async (view, file = new File(['image bytes'], 'original.png', { type: 'image/png' })) => {
+  const input = find(view.root, el => el.props.id === 'banner-image')
+  input.files = file ? [file] : []; input.props.onChange({ target: input }); await nextTick()
+}
+const bannerBoundary = () => {
+  assert.ok(calls.every(c => /^\/admin\/banners(?:\/(?:\d+(?:\/status)?|order))?$/.test(c.url)))
+  assertMemberUntouched()
+}
+
+test('Banner service six endpoints, FormData create/spoof replace, JSON patch; no multipart boundary override', async () => {
+  api.defaults.adapter = bannerAdapter([])
+  const file = new File(['fixture'], 'upload.png', { type: 'image/png' })
+  await bannerService.getAdminBanners()
+  await bannerService.createAdminBanner({ title: '新輪播', subtitle: null, button_text: null, link_url: null, sort_order: 0, image: file })
+  await bannerService.updateAdminBanner(2, { title: '編輯', subtitle: null })
+  await bannerService.updateAdminBanner(2, { image: file, title: '替換' })
+  await bannerService.updateAdminBannerStatus(2, 'inactive')
+  await bannerService.reorderAdminBanners({ ids: [2, 1] })
+  await bannerService.deleteAdminBanner(2)
+  assert.deepEqual(calls.map(c => [c.method, c.url]), [['get', '/admin/banners'], ['post', '/admin/banners'], ['patch', '/admin/banners/2'], ['post', '/admin/banners/2'], ['patch', '/admin/banners/2/status'], ['patch', '/admin/banners/order'], ['delete', '/admin/banners/2']])
+  assert.ok(calls[1].data instanceof FormData); assert.equal(calls[1].data.get('image').name, file.name); assert.equal(calls[1].data.get('subtitle'), '')
+  assert.deepEqual(JSON.parse(calls[2].data), { title: '編輯', subtitle: null }); assert.equal(calls[3].data.get('_method'), 'PATCH')
+  assert.ok(!String(calls[3].headers['Content-Type']).includes('boundary=')); assert.deepEqual(JSON.parse(calls[4].data), { status: 'inactive' })
+  assert.deepEqual(JSON.parse(calls[5].data), { ids: [2, 1] }); bannerBoundary()
+})
+
+test('Banner route replaces placeholder, renders both states/preview/pair/order; empty and loading', async () => {
+  let finish
+  api.defaults.adapter = c => { calls.push(c); return new Promise(resolve => { finish = () => resolve(response(c, { data: [bannerRow(), bannerRow(2, 'inactive')] })) }) }
+  const view = await bannersView(); assert.ok(text(view.root).includes('載入輪播中')); assert.ok(button(view, '新增輪播').props.disabled)
+  finish(); await settle(); assert.ok(text(view.root).includes('輪播1')); assert.ok(text(view.root).includes('輪播2'))
+  assert.ok(text(view.root).includes('/products')); assert.ok(!text(view.root).includes('尚未實作'))
+  assert.ok(text(view.root).includes('推薦商品管理將於後續步驟完成'))
+  assert.equal(find(view.root, el => el.type === 'img').props.src, bannerRow().image_url); bannerBoundary(); view.app.unmount()
+  api.defaults.adapter = bannerAdapter([]); const empty = await bannersView(); assert.ok(text(empty.root).includes('目前沒有輪播')); empty.app.unmount()
+})
+
+test('Banner initial GET error/manual retry and old initial success cannot replace newer retry', async () => {
+  api.defaults.adapter = c => { calls.push(c); return Promise.reject(failure(c, 503)) }
+  const view = await bannersView(); assert.ok(text(view.root).includes('稍後再試')); assert.ok(button(view, '新增輪播').props.disabled)
+  api.defaults.adapter = bannerAdapter([bannerRow()]); await click(view, '重新載入'); assert.ok(text(view.root).includes('輪播1')); assert.equal(mutations().length, 0); view.app.unmount()
+  let finishOld, first = true
+  api.defaults.adapter = c => { calls.push(c); if (first) { first = false; return new Promise(resolve => { finishOld = () => resolve(response(c, { data: [bannerRow(9)] })) }) }; return Promise.resolve(response(c, { data: [bannerRow(2)] })) }
+  const late = await bannersView()
+  await click(late, '重新載入輪播'); assert.ok(text(late.root).includes('輪播2')); finishOld(); await settle()
+  assert.ok(!text(late.root).includes('輪播9')); assert.ok(text(late.root).includes('輪播2')); late.app.unmount(); assertMemberUntouched()
+})
+
+test('Banner create pair UX, FormData inactive, pending disables all contexts/cancel, success authoritative GET', async () => {
+  let finish, rows = [bannerRow()]
+  api.defaults.adapter = bannerAdapter(() => rows, c => new Promise(resolve => { finish = () => { rows = [bannerRow(2, 'inactive')]; resolve(response(c, { data: rows[0], message: '新增輪播完成' })) } }))
+  const view = await bannersView(); await click(view, '新增輪播'); await inputValue(view, 'banner-title', '草稿')
+  await inputValue(view, 'banner-button', '前往'); await bannerFile(view); await submitCore(view)
+  assert.equal(mutations().length, 0); assert.ok(text(view.root).includes('同時填寫'))
+  await inputValue(view, 'banner-link', '/products/12'); await inputValue(view, 'banner-status', 'inactive'); await submitCore(view); await submitCore(view)
+  assert.equal(mutations().length, 1); assert.equal(mutations()[0].data.get('status'), 'inactive'); assert.equal(mutations()[0].data.get('button_text'), '前往')
+  for (const label of ['新增輪播', '編輯', '下架', '刪除', '放棄', '提交中…']) assert.ok(button(view, label).props.disabled, label)
+  await click(view, '放棄'); await click(view, '編輯'); assert.equal(find(view.root, el => el.props.id === 'banner-title').value, '草稿')
+  assert.ok(text(view.root).includes('輪播1')); finish(); await settle(); assert.equal(find(view.root, el => el.type === 'form'), undefined)
+  assert.ok(text(view.root).includes('新增輪播完成')); assert.ok(text(view.root).includes('輪播2')); assert.ok(!button(view, '新增輪播').props.disabled)
+  assert.equal(calls.filter(c => c.method === 'get').length, 2); bannerBoundary(); view.app.unmount()
+})
+
+test('Banner edit JSON clear pair, omit image/status; image replacement spoof and preview revoked', async () => {
+  api.defaults.adapter = bannerAdapter([bannerRow()])
+  const view = await bannersView(); await click(view, '編輯')
+  assert.equal(find(view.root, el => el.props.id === 'banner-status'), undefined)
+  await inputValue(view, 'banner-subtitle', ''); await inputValue(view, 'banner-button', ''); await inputValue(view, 'banner-link', ''); await submitCore(view)
+  const data = JSON.parse(mutations()[0].data); assert.equal(data.subtitle, null); assert.equal(data.button_text, null); assert.equal(data.link_url, null)
+  assert.ok(!('image' in data)); assert.ok(!('status' in data))
+  const createUrl = URL.createObjectURL, revokeUrl = URL.revokeObjectURL, revoked = []; let n = 0
+  URL.createObjectURL = () => 'blob:banner-' + ++n; URL.revokeObjectURL = value => revoked.push(value)
+  try {
+    await click(view, '編輯'); await bannerFile(view); await bannerFile(view); assert.deepEqual(revoked, ['blob:banner-1'])
+    await submitCore(view); const replace = mutations()[1]; assert.equal(replace.method, 'post'); assert.equal(replace.data.get('_method'), 'PATCH')
+    assert.deepEqual(revoked, ['blob:banner-1', 'blob:banner-2'])
+    await click(view, '新增輪播'); await bannerFile(view); view.app.unmount(); assert.ok(revoked.includes('blob:banner-3'))
+  } finally { URL.createObjectURL = createUrl; URL.revokeObjectURL = revokeUrl }
+  bannerBoundary()
+})
+
+for (const [type, size] of [['image/gif', 2], ['image/png', 5 * 1024 * 1024 + 1]]) {
+  test(`Banner file UX rejects ${type}/${size} before mutation`, async () => {
+    api.defaults.adapter = bannerAdapter([]); const view = await bannersView(); await click(view, '新增輪播')
+    await bannerFile(view, new File([new Uint8Array(size)], 'bad', { type })); await inputValue(view, 'banner-title', '草稿')
+    assert.ok(text(view.root).includes('5 MiB')); await submitCore(view); assert.equal(mutations().length, 0); view.app.unmount()
+  })
+}
+
+for (const action of ['status', 'delete', 'order']) {
+  test(`Banner ${action} confirmation/working order, one mutation, GET authoritative, no optimistic`, async () => {
+    let finish, rows = [bannerRow(), bannerRow(2, 'inactive')]
+    api.defaults.adapter = bannerAdapter(() => rows, c => new Promise(resolve => { finish = () => { rows = action === 'delete' ? [bannerRow(2, 'inactive')] : action === 'status' ? [bannerRow(1, 'inactive'), bannerRow(2, 'inactive')] : [bannerRow(2, 'inactive'), bannerRow()]; resolve(response(c, { message: '權威操作完成', data: rows[0] })) } }))
+    const view = await bannersView()
+    if (action === 'order') { await click(view, '下移'); assert.equal(mutations().length, 0); await click(view, '儲存排序'); await click(view, '儲存排序') }
+    else { await click(view, action === 'status' ? '下架' : '刪除'); assert.equal(mutations().length, 0)
+      if (action === 'delete') { assert.ok(text(view.root).includes('永久刪除')); assert.ok(text(view.root).includes('不影響商品資料')) }
+      await click(view, '確認'); await click(view, '確認') }
+    assert.equal(mutations().length, 1); assert.ok(button(view, '新增輪播').props.disabled); assert.ok(text(view.root).includes('輪播1'))
+    if (action === 'order') assert.deepEqual(JSON.parse(mutations()[0].data), { ids: [2, 1] })
+    if (action === 'status') assert.deepEqual(JSON.parse(mutations()[0].data), { status: 'inactive' })
+    finish(); await settle(); assert.ok(text(view.root).includes('權威操作完成')); assert.equal(calls.filter(c => c.method === 'get').length, 2)
+    assert.ok(!button(view, '新增輪播').props.disabled); bannerBoundary(); view.app.unmount()
+  })
+}
+
+test('Banner inactive status can be activated', async () => {
+  api.defaults.adapter = bannerAdapter([bannerRow(1, 'inactive')]); const view = await bannersView()
+  await click(view, '上架'); await click(view, '確認'); assert.deepEqual(JSON.parse(mutations()[0].data), { status: 'active' }); bannerBoundary(); view.app.unmount()
+})
+
+for (const [status, code] of [[401], [403, 'ADMIN_ACCOUNT_DISABLED'], [403], [419], [422], [undefined], [500]]) {
+  for (const action of ['form', 'status', 'delete', 'order']) {
+    test(`Banner ${action} ${status ?? 'network'}/${code ?? ''}: retain draft/tree, coordinator isolation, no retry`, async () => {
+      api.defaults.adapter = bannerAdapter([bannerRow(), bannerRow(2)], c => {
+        const e = failure(c, status, code)
+        if (status === 422) e.response.data = { message: '資料已變更，請重新載入', errors: { title: ['欄位錯誤原因'] } }
+        throw e
+      })
+      const view = await bannersView()
+      if (action === 'form') { await click(view, '編輯'); await inputValue(view, 'banner-title', '保留草稿'); await submitCore(view) }
+      else if (action === 'order') { await click(view, '下移'); await click(view, '儲存排序') }
+      else { await click(view, action === 'status' ? '下架' : '刪除'); await click(view, '確認') }
+      await settle(); assert.equal(mutations().length, 1)
+      if (status === 401 || code) { assert.equal(auth.currentAdmin, null); assert.equal(view.router.currentRoute.value.name, 'admin-login') }
+      else {
+        assert.equal(auth.currentAdmin.id, admin.id); assert.ok(text(view.root).includes('輪播1')); assert.equal(button(view, '新增輪播').props.disabled, action === 'order' && status === 422)
+        if (status === 422) { assert.ok(text(view.root).includes('欄位錯誤原因')); assert.ok(text(view.root).includes('請重新載入')) }
+        if (action === 'form') assert.equal(find(view.root, el => el.props.id === 'banner-title').value, '保留草稿')
+      }
+      bannerBoundary(); view.app.unmount()
+    })
+  }
+}
+
+test('Banner mutation success + refresh failure preserves success/stale list, disables mutation, retry GET only', async () => {
+  let get = 0
+  api.defaults.adapter = async c => {
+    calls.push(c)
+    if (c.method !== 'get') return response(c, { message: 'DB 已成功更新' })
+    if (++get === 2) throw failure(c, 503)
+    return response(c, { data: [bannerRow(1, get > 2 ? 'inactive' : 'active')] })
+  }
+  const view = await bannersView(); await click(view, '下架'); await click(view, '確認')
+  assert.ok(text(view.root).includes('DB 已成功更新')); assert.ok(text(view.root).includes('最新輪播資料重新載入失敗'))
+  assert.ok(text(view.root).includes('舊資料')); assert.ok(button(view, '新增輪播').props.disabled); await click(view, '編輯'); assert.equal(find(view.root, el => el.type === 'form'), undefined)
+  await click(view, '重新載入'); assert.equal(mutations().length, 1); assert.equal(get, 3); assert.ok(!button(view, '新增輪播').props.disabled)
+  assert.ok(text(view.root).includes('DB 已成功更新')); bannerBoundary(); view.app.unmount()
+})
+
+for (const outcome of ['success', 'error', 'refresh-success', 'refresh-error']) {
+  test(`Banner route leave pending ${outcome} cannot refresh/navigate/message other module`, async () => {
+    let finish, get = 0
+    api.defaults.adapter = async c => {
+      calls.push(c)
+      if (c.url === '/admin/orders') return response(c, adminOrderPage())
+      if (c.method === 'get') {
+        if (++get === 1) return response(c, { data: [bannerRow()] })
+        return new Promise((resolve, reject) => { finish = () => outcome === 'refresh-error' ? reject(failure(c, 503)) : resolve(response(c, { data: [bannerRow(9)] })) })
+      }
+      if (outcome.startsWith('refresh')) return response(c, { message: '舊輪播成功' })
+      return new Promise((resolve, reject) => { finish = () => outcome === 'error' ? reject(failure(c, 422)) : resolve(response(c, { message: '舊輪播成功' })) })
+    }
+    const view = await bannersView(); await click(view, '下架'); await click(view, '確認')
+    await view.router.push('/admin/orders'); await settle(); finish(); await settle()
+    assert.equal(view.router.currentRoute.value.fullPath, '/admin/orders'); assert.ok(!text(view.root).includes('舊輪播成功')); assert.ok(!text(view.root).includes('輪播9'))
+    assert.equal(mutations().length, 1); assertMemberUntouched(); view.app.unmount()
+  })
 }
 
 test('獨立 transport／service：CSRF→login、me、logout 及四欄 envelope', async () => {
@@ -403,11 +585,11 @@ test('Admin-only 八模組保持階段對照，products／inventory／categories
     await view.router.push('/admin/' + item.path); await settle()
     const main = find(view.root, (el) => el.type === 'main')
     assert.ok(text(main).includes(item.title))
-    if (['products', 'inventory', 'categories', 'orders', 'users'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
+    if (['products', 'inventory', 'categories', 'orders', 'users', 'home-content'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
     else { assert.ok(text(main).includes('尚未實作')); assert.ok(text(main).includes('Stage ' + item.stage)) }
   }
   assert.deepEqual(routes.adminModules.map((item) => item.stage), [24, 19, 20, 19, 21, 21, 22, 23])
-  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/categories', '/admin/inventory', '/admin/orders', '/admin/products', '/admin/users', '/categories', '/categories']); assert.equal(member.currentUser, null)
+  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/banners', '/admin/categories', '/admin/inventory', '/admin/orders', '/admin/products', '/admin/users', '/categories', '/categories']); assert.equal(member.currentUser, null)
   const frontLink = find(view.root, (el) => el.type === 'a' && el.props.href === '/')
   assert.ok(frontLink); assert.equal(frontLink.props.onClick, undefined)
   const menu = find(view.root, (el) => el.type === 'button' && text(el) === '選單')
