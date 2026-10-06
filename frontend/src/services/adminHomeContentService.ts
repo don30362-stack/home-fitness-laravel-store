@@ -1,6 +1,6 @@
 import adminApi from './adminApi'
 import type { ApiMessageOnlyResponse } from '@/types/api'
-import type { AdminBannerListResponse, AdminBannerMutationResponse, BannerStatus, CreateAdminBannerPayload, UpdateAdminBannerPayload, ReorderBannerPayload } from '@/types/adminHomeContent'
+import type { AdminBannerListResponse, AdminBannerMutationResponse, BannerStatus, CreateAdminBannerPayload, UpdateAdminBannerPayload, ReorderBannerPayload, AdminRecommendedProductListResponse, AdminRecommendedProductMutationResponse, CreateRecommendedProductPayload, ReorderRecommendedProductsPayload } from '@/types/adminHomeContent'
 
 const multipart = (payload: CreateAdminBannerPayload | UpdateAdminBannerPayload): FormData => {
   const form = new FormData()
@@ -26,3 +26,14 @@ export const reorderAdminBanners = async (payload: ReorderBannerPayload): Promis
   (await adminApi.patch<ApiMessageOnlyResponse>('/admin/banners/order', payload)).data
 export const deleteAdminBanner = async (id: number): Promise<ApiMessageOnlyResponse> =>
   (await adminApi.delete<ApiMessageOnlyResponse>(`/admin/banners/${id}`)).data
+
+export const getAdminRecommendedProducts = async (): Promise<AdminRecommendedProductListResponse> =>
+  (await adminApi.get<AdminRecommendedProductListResponse>('/admin/recommended-products')).data
+export const createAdminRecommendedProduct = async (productId: number): Promise<AdminRecommendedProductMutationResponse> => {
+  const payload: CreateRecommendedProductPayload = { product_id: productId }
+  return (await adminApi.post<AdminRecommendedProductMutationResponse>('/admin/recommended-products', payload)).data
+}
+export const reorderAdminRecommendedProducts = async (payload: ReorderRecommendedProductsPayload): Promise<ApiMessageOnlyResponse> =>
+  (await adminApi.patch<ApiMessageOnlyResponse>('/admin/recommended-products/order', payload)).data
+export const deleteAdminRecommendedProduct = async (id: number): Promise<ApiMessageOnlyResponse> =>
+  (await adminApi.delete<ApiMessageOnlyResponse>(`/admin/recommended-products/${id}`)).data

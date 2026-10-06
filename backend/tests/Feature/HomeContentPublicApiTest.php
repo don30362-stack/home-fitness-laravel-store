@@ -91,7 +91,7 @@ class HomeContentPublicApiTest extends TestCase
         $this->assertTrue(Schema::hasTable('recommended_products'));
     }
 
-    public function test_public_routes_remain_get_only_and_admin_recommendations_are_not_started(): void
+    public function test_public_routes_remain_get_only_and_separate_from_admin_routes(): void
     {
         $routes = collect(Route::getRoutes());
         foreach (['api/banners', 'api/recommended-products'] as $uri) {
@@ -100,7 +100,6 @@ class HomeContentPublicApiTest extends TestCase
             $this->assertSame(['GET', 'HEAD'], $route->methods());
             $this->assertSame(['api'], $route->gatherMiddleware());
         }
-        $this->assertFalse($routes->contains(fn ($route) => str_starts_with($route->uri(), 'api/admin/recommended-products')));
     }
 
     public function test_relation_cardinality_and_cascade_on_unreferenced_product_delete(): void

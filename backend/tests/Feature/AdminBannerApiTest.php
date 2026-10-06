@@ -355,7 +355,7 @@ class AdminBannerApiTest extends TestCase
         $this->patchJson('/api/admin/banners/order', ['ids' => [$b->id, $a->id]])->assertStatus(500);
         $this->assertSame(5, $a->fresh()->sort_order); $this->assertSame(6, $b->fresh()->sort_order); Banner::flushEventListeners();
     }
-    public function test_numeric_missing_ids_and_no_admin_recommendation_routes(): void
+    public function test_numeric_missing_ids_and_six_admin_banner_routes(): void
     {
         $this->login();
         foreach (['patch', 'delete'] as $method) foreach (['unknown', '999'] as $id) {
@@ -365,6 +365,5 @@ class AdminBannerApiTest extends TestCase
         $routes = collect(app('router')->getRoutes())->filter(fn ($r) => str_starts_with($r->uri(), 'api/admin/banners'));
         $this->assertCount(6, $routes);
         foreach ($routes as $route) $this->assertSame(['api', 'auth:admin', 'admin.active'], $route->gatherMiddleware());
-        $this->assertFalse(collect(app('router')->getRoutes())->contains(fn ($r) => str_starts_with($r->uri(), 'api/admin/recommended-products')));
     }
 }

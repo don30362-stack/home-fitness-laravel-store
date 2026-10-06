@@ -30,6 +30,7 @@ const adminViews = {
   InventoryManagementView: '/src/views/admin/InventoryManagementView.vue',
   CategoryManagementView: '/src/views/admin/CategoryManagementView.vue',
   HomeContentManagementView: '/src/views/admin/HomeContentManagementView.vue',
+  RecommendedProductManager: '/src/components/admin/RecommendedProductManager.vue',
   CategoryForm: '/src/components/admin/CategoryForm.vue',
   OrderManagementView: '/src/views/admin/OrderManagementView.vue',
   AdminOrderDetailView: '/src/views/admin/AdminOrderDetailView.vue',
@@ -134,6 +135,7 @@ beforeEach(() => {
     if (config.url === '/categories') return response(config, { data: categoryOptions })
     if (config.url === '/admin/categories') return response(config, { data: adminCategoryTree })
     if (config.url === '/admin/banners') return response(config, { data: [] })
+    if (config.url === '/admin/recommended-products') return response(config, { data: [] })
     if (config.url === '/admin/orders') return response(config, adminOrderPage())
     if (config.url === '/admin/users') return response(config, userPage())
     if (/^\/admin\/users\/\d+$/.test(config.url)) return response(config, { data: userDetail('active', Number(config.url.split('/').at(-1)), [adminOrderSummary], Number(config.params?.order_page ?? 1)) })
@@ -156,6 +158,7 @@ const bannerRow = (id = 1, status = 'active') => ({ id, title: '輪播' + id, su
   sort_order: id - 1, status, created_at: null, updated_at: null })
 const bannerAdapter = (rows, handler = c => response(c, { data: bannerRow(), message: '輪播操作成功' })) => async c => {
   calls.push(c)
+  if (c.url === '/admin/recommended-products') return response(c, { data: [] })
   return c.method === 'get' ? response(c, { data: typeof rows === 'function' ? rows() : rows }) : handler(c)
 }
 const bannersView = () => { auth.isAdminInitialized = true; return mountRoute('/admin/home-content') }
@@ -164,7 +167,7 @@ const bannerFile = async (view, file = new File(['image bytes'], 'original.png',
   input.files = file ? [file] : []; input.props.onChange({ target: input }); await nextTick()
 }
 const bannerBoundary = () => {
-  assert.ok(calls.every(c => /^\/admin\/banners(?:\/(?:\d+(?:\/status)?|order))?$/.test(c.url)))
+  assert.ok(calls.every(c => c.method === 'get' && c.url === '/admin/recommended-products' || /^\/admin\/banners(?:\/(?:\d+(?:\/status)?|order))?$/.test(c.url)))
   assertMemberUntouched()
 }
 
@@ -187,11 +190,11 @@ test('Banner service six endpoints, FormData create/spoof replace, JSON patch; n
 
 test('Banner route replaces placeholder, renders both states/preview/pair/order; empty and loading', async () => {
   let finish
-  api.defaults.adapter = c => { calls.push(c); return new Promise(resolve => { finish = () => resolve(response(c, { data: [bannerRow(), bannerRow(2, 'inactive')] })) }) }
+  api.defaults.adapter = c => { calls.push(c); if (c.url === '/admin/recommended-products') return Promise.resolve(response(c, { data: [] })); return new Promise(resolve => { finish = () => resolve(response(c, { data: [bannerRow(), bannerRow(2, 'inactive')] })) }) }
   const view = await bannersView(); assert.ok(text(view.root).includes('載入輪播中')); assert.ok(button(view, '新增輪播').props.disabled)
   finish(); await settle(); assert.ok(text(view.root).includes('輪播1')); assert.ok(text(view.root).includes('輪播2'))
   assert.ok(text(view.root).includes('/products')); assert.ok(!text(view.root).includes('尚未實作'))
-  assert.ok(text(view.root).includes('推薦商品管理將於後續步驟完成'))
+  assert.ok(text(view.root).includes('推薦商品管理')); assert.ok(!text(view.root).includes('推薦商品管理將於後續步驟完成'))
   assert.equal(find(view.root, el => el.type === 'img').props.src, bannerRow().image_url); bannerBoundary(); view.app.unmount()
   api.defaults.adapter = bannerAdapter([]); const empty = await bannersView(); assert.ok(text(empty.root).includes('目前沒有輪播')); empty.app.unmount()
 })
@@ -201,7 +204,7 @@ test('Banner initial GET error/manual retry and old initial success cannot repla
   const view = await bannersView(); assert.ok(text(view.root).includes('稍後再試')); assert.ok(button(view, '新增輪播').props.disabled)
   api.defaults.adapter = bannerAdapter([bannerRow()]); await click(view, '重新載入'); assert.ok(text(view.root).includes('輪播1')); assert.equal(mutations().length, 0); view.app.unmount()
   let finishOld, first = true
-  api.defaults.adapter = c => { calls.push(c); if (first) { first = false; return new Promise(resolve => { finishOld = () => resolve(response(c, { data: [bannerRow(9)] })) }) }; return Promise.resolve(response(c, { data: [bannerRow(2)] })) }
+  api.defaults.adapter = c => { calls.push(c); if (c.url === '/admin/recommended-products') return Promise.resolve(response(c, { data: [] })); if (first) { first = false; return new Promise(resolve => { finishOld = () => resolve(response(c, { data: [bannerRow(9)] })) }) }; return Promise.resolve(response(c, { data: [bannerRow(2)] })) }
   const late = await bannersView()
   await click(late, '重新載入輪播'); assert.ok(text(late.root).includes('輪播2')); finishOld(); await settle()
   assert.ok(!text(late.root).includes('輪播9')); assert.ok(text(late.root).includes('輪播2')); late.app.unmount(); assertMemberUntouched()
@@ -219,7 +222,7 @@ test('Banner create pair UX, FormData inactive, pending disables all contexts/ca
   await click(view, '放棄'); await click(view, '編輯'); assert.equal(find(view.root, el => el.props.id === 'banner-title').value, '草稿')
   assert.ok(text(view.root).includes('輪播1')); finish(); await settle(); assert.equal(find(view.root, el => el.type === 'form'), undefined)
   assert.ok(text(view.root).includes('新增輪播完成')); assert.ok(text(view.root).includes('輪播2')); assert.ok(!button(view, '新增輪播').props.disabled)
-  assert.equal(calls.filter(c => c.method === 'get').length, 2); bannerBoundary(); view.app.unmount()
+  assert.equal(calls.filter(c => c.method === 'get' && c.url === '/admin/banners').length, 2); bannerBoundary(); view.app.unmount()
 })
 
 test('Banner edit JSON clear pair, omit image/status; image replacement spoof and preview revoked', async () => {
@@ -260,7 +263,7 @@ for (const action of ['status', 'delete', 'order']) {
     assert.equal(mutations().length, 1); assert.ok(button(view, '新增輪播').props.disabled); assert.ok(text(view.root).includes('輪播1'))
     if (action === 'order') assert.deepEqual(JSON.parse(mutations()[0].data), { ids: [2, 1] })
     if (action === 'status') assert.deepEqual(JSON.parse(mutations()[0].data), { status: 'inactive' })
-    finish(); await settle(); assert.ok(text(view.root).includes('權威操作完成')); assert.equal(calls.filter(c => c.method === 'get').length, 2)
+    finish(); await settle(); assert.ok(text(view.root).includes('權威操作完成')); assert.equal(calls.filter(c => c.method === 'get' && c.url === '/admin/banners').length, 2)
     assert.ok(!button(view, '新增輪播').props.disabled); bannerBoundary(); view.app.unmount()
   })
 }
@@ -298,6 +301,7 @@ test('Banner mutation success + refresh failure preserves success/stale list, di
   let get = 0
   api.defaults.adapter = async c => {
     calls.push(c)
+    if (c.url === '/admin/recommended-products') return response(c, { data: [] })
     if (c.method !== 'get') return response(c, { message: 'DB 已成功更新' })
     if (++get === 2) throw failure(c, 503)
     return response(c, { data: [bannerRow(1, get > 2 ? 'inactive' : 'active')] })
@@ -314,6 +318,7 @@ for (const outcome of ['success', 'error', 'refresh-success', 'refresh-error']) 
     let finish, get = 0
     api.defaults.adapter = async c => {
       calls.push(c)
+      if (c.url === '/admin/recommended-products') return response(c, { data: [] })
       if (c.url === '/admin/orders') return response(c, adminOrderPage())
       if (c.method === 'get') {
         if (++get === 1) return response(c, { data: [bannerRow()] })
@@ -327,6 +332,188 @@ for (const outcome of ['success', 'error', 'refresh-success', 'refresh-error']) 
     assert.equal(view.router.currentRoute.value.fullPath, '/admin/orders'); assert.ok(!text(view.root).includes('舊輪播成功')); assert.ok(!text(view.root).includes('輪播9'))
     assert.equal(mutations().length, 1); assertMemberUntouched(); view.app.unmount()
   })
+}
+
+// Stage22 Recommendation: same page, independent state and existing Admin product selector.
+const recommendedRow = (id = 31, productId = 1, visible = false) => ({ id, product_id: productId, sort_order: 0,
+  is_publicly_visible: visible, unavailable_reason: visible ? null : '商品目前為下架狀態，不會顯示於前台推薦。',
+  product: { ...productItem, id: productId, name: `推薦商品${productId}`, status: visible ? 'active' : 'inactive', stock: 0, has_variants: false } })
+const recommendationRoot = view => ({ root: find(view.root, el => el.props['aria-labelledby'] === 'recommended-management-title') })
+const recommendedAdapter = (rows = [recommendedRow()], handler = c => response(c, { message: '推薦操作成功' }), selector = () => productPage()) => async c => {
+  calls.push(c)
+  if (c.url === '/admin/banners') return response(c, { data: [] })
+  if (c.url === '/admin/orders') return response(c, adminOrderPage())
+  if (c.url === '/admin/products') return selector(c)
+  assert.ok(/^\/admin\/recommended-products(?:\/(?:order|\d+))?$/.test(c.url), c.url)
+  return c.method === 'get' ? response(c, { data: typeof rows === 'function' ? rows() : rows }) : handler(c)
+}
+const recommendationCalls = () => calls.filter(c => c.url.startsWith('/admin/recommended-products'))
+const recommendedBoundary = () => {
+  assert.ok(calls.every(c => c.url === '/admin/banners' && c.method === 'get' || c.url === '/admin/products' && c.method === 'get' || /^\/admin\/recommended-products(?:\/(?:order|\d+))?$/.test(c.url)))
+  assertMemberUntouched()
+}
+const prepareRecommendedAction = async (view, action) => {
+  const section = recommendationRoot(view)
+  if (action === 'add') { await click(section, '選擇推薦商品'); await click(section, '加入推薦') }
+  if (action === 'delete') { await click(section, '移除推薦'); await click(section, '確認移除推薦') }
+  if (action === 'reorder') { await click(section, '推薦下移'); await click(section, '儲存推薦排序') }
+}
+
+test('Recommended service four exact endpoints and identity payload, Admin transport only', async () => {
+  api.defaults.adapter = recommendedAdapter()
+  await bannerService.getAdminRecommendedProducts(); await bannerService.createAdminRecommendedProduct(8)
+  await bannerService.deleteAdminRecommendedProduct(31); await bannerService.reorderAdminRecommendedProducts({ ids: [40, 31] })
+  assert.deepEqual(calls.map(c => [c.method, c.url]), [['get', '/admin/recommended-products'], ['post', '/admin/recommended-products'], ['delete', '/admin/recommended-products/31'], ['patch', '/admin/recommended-products/order']])
+  assert.deepEqual(JSON.parse(calls[1].data), { product_id: 8 }); assert.deepEqual(JSON.parse(calls[3].data), { ids: [40, 31] }); recommendedBoundary()
+})
+test('Recommended loading, complete visibility/reason including stock zero, empty list', async () => {
+  let finish
+  api.defaults.adapter = recommendedAdapter(() => [], c => response(c, {}))
+  const base = api.defaults.adapter
+  api.defaults.adapter = c => c.url === '/admin/recommended-products' ? (calls.push(c), new Promise(resolve => { finish = () => resolve(response(c, { data: [recommendedRow(), recommendedRow(40, 2, true)] })) })) : base(c)
+  const view = await bannersView(); const section = recommendationRoot(view)
+  assert.ok(text(section.root).includes('載入推薦商品')); assert.ok(button(section, '選擇推薦商品').props.disabled)
+  finish(); await settle(); assert.ok(text(section.root).includes('目前不會顯示於前台')); assert.ok(text(section.root).includes('前台顯示中')); assert.ok(text(section.root).includes('下架狀態')); recommendedBoundary(); view.app.unmount()
+  api.defaults.adapter = recommendedAdapter([]); const empty = await bannersView(); assert.ok(text(recommendationRoot(empty).root).includes('目前沒有推薦商品')); empty.app.unmount()
+})
+test('Recommended list error manual GET retry and late old GET cannot replace new rows', async () => {
+  let bad = true
+  api.defaults.adapter = recommendedAdapter(() => { if (bad) throw failure({}, 503); return [recommendedRow()] })
+  const view = await bannersView(); const section = recommendationRoot(view)
+  assert.ok(button(section, '選擇推薦商品').props.disabled); bad = false; await click(section, '重新載入推薦商品')
+  assert.ok(text(section.root).includes('推薦商品1')); view.app.unmount()
+  let old, get = 0
+  api.defaults.adapter = recommendedAdapter(); const base = api.defaults.adapter
+  api.defaults.adapter = c => c.url === '/admin/recommended-products' && ++get === 1 ? (calls.push(c), new Promise(resolve => { old = () => resolve(response(c, { data: [recommendedRow(99, 99)] })) })) : base(c)
+  const late = await bannersView(); await click(recommendationRoot(late), '重新載入推薦商品'); old(); await settle()
+  assert.ok(!text(late.root).includes('推薦商品99')); assert.ok(text(late.root).includes('推薦商品1')); recommendedBoundary(); late.app.unmount()
+})
+test('Recommended selector server search/page, already selected disabled, inactive product can add', async () => {
+  let selected = [recommendedRow()]
+  api.defaults.adapter = recommendedAdapter(() => selected, c => { selected = [...selected, recommendedRow(40, 2)]; return response(c, { message: '新增推薦完成' }) }, c => response(c, productPage([{ ...productItem }, { ...productItem, id: 2, name: '可新增停用商品', status: 'disabled' }], Number(c.params.page), 2)))
+  const view = await bannersView(); const section = recommendationRoot(view); await click(section, '選擇推薦商品')
+  assert.ok(button(section, '已推薦').props.disabled); await click(section, '已推薦'); assert.equal(mutations().length, 0)
+  await inputValue(section, 'recommended-search', 'PRD-搜尋')
+  find(section.root, el => el.type === 'form').props.onSubmit({ preventDefault() {} }); await settle()
+  assert.deepEqual(calls.filter(c => c.url === '/admin/products').at(-1).params, { search: 'PRD-搜尋', page: '1' })
+  await click(section, '下一頁商品'); assert.equal(calls.at(-1).params.page, '2'); assert.equal(calls.at(-1).params.search, 'PRD-搜尋')
+  await click(section, '上一頁商品'); await click(section, '加入推薦'); assert.deepEqual(JSON.parse(mutations()[0].data), { product_id: 2 })
+  assert.ok(text(section.root).includes('新增推薦完成')); assert.equal(find(section.root, el => el.type === 'button' && text(el) === '加入推薦'), undefined)
+  recommendedBoundary(); view.app.unmount()
+})
+test('Selector loading/empty/error retry stays independent of recommendation remove', async () => {
+  let finish, bad = true
+  api.defaults.adapter = recommendedAdapter([recommendedRow()], c => response(c, { message: '已移除' }), c => new Promise((resolve, reject) => { finish = () => bad ? reject(failure(c, 503)) : resolve(response(c, productPage([], 1, 1))) }))
+  const view = await bannersView(); const section = recommendationRoot(view); await click(section, '選擇推薦商品')
+  assert.ok(text(section.root).includes('載入商品選項')); finish(); await settle(); assert.ok(button(section, '重試商品選項'))
+  assert.ok(!button(section, '移除推薦').props.disabled); bad = false; await click(section, '重試商品選項'); finish(); await settle()
+  assert.ok(text(section.root).includes('沒有符合條件的商品')); recommendedBoundary(); view.app.unmount()
+})
+test('Selector old search/page success or error does not replace latest options', async () => {
+  const requests = []
+  api.defaults.adapter = recommendedAdapter([], undefined, c => new Promise((resolve, reject) => requests.push({ c, resolve, reject })))
+  const view = await bannersView(); const section = recommendationRoot(view); await click(section, '選擇推薦商品')
+  for (const search of ['older', 'latest']) { await inputValue(section, 'recommended-search', search); find(section.root, el => el.type === 'form').props.onSubmit({ preventDefault() {} }); await settle() }
+  requests[2].resolve(response(requests[2].c, productPage([{ ...productItem, name: '最新商品選項' }]))); await settle()
+  requests[0].resolve(response(requests[0].c, productPage([{ ...productItem, name: '舊商品選項' }]))); requests[1].reject(failure(requests[1].c, 500)); await settle()
+  assert.ok(text(section.root).includes('最新商品選項')); assert.ok(!text(section.root).includes('舊商品選項')); assert.equal(button(section, '重試商品選項'), undefined); recommendedBoundary(); view.app.unmount()
+})
+for (const action of ['add', 'delete', 'reorder']) {
+  test(`Recommended ${action} pending mutual exclusion, no optimistic, success authoritative GET`, async () => {
+    let finish, rows = [recommendedRow(31, 1), recommendedRow(40, 2)]
+    api.defaults.adapter = recommendedAdapter(() => rows, c => new Promise(resolve => { finish = () => { rows = [recommendedRow(50, 8, true)]; resolve(response(c, { message: '推薦權威成功' })) } }), c => response(c, productPage([{ ...productItem, id: 3 }], 1, 1)))
+    const view = await bannersView(); const section = recommendationRoot(view); await prepareRecommendedAction(view, action)
+    assert.ok(button(section, '選擇推薦商品').props.disabled); assert.ok(button(section, '重新載入推薦商品').props.disabled)
+    assert.ok(button(section, '移除推薦').props.disabled); await prepareRecommendedAction(view, action); await click(section, '重新載入推薦商品')
+    assert.equal(mutations().length, 1); assert.ok(text(section.root).includes('推薦商品1')); assert.ok(!text(section.root).includes('推薦商品8'))
+    if (action === 'delete') { assert.equal(mutations()[0].url, '/admin/recommended-products/31'); assert.ok(text(section.root).includes('不會刪除商品')); assert.ok(text(section.root).includes('歷史訂單')) }
+    if (action === 'reorder') assert.deepEqual(JSON.parse(mutations()[0].data), { ids: [40, 31] })
+    finish(); await settle(); assert.ok(text(section.root).includes('推薦權威成功')); assert.ok(text(section.root).includes('推薦商品8')); assert.equal(recommendationCalls().filter(c => c.method === 'get').length, 2)
+    assert.ok(!button(section, '選擇推薦商品').props.disabled); recommendedBoundary(); view.app.unmount()
+  })
+  for (const status of [403, 419, 422, undefined, 500]) {
+    test(`Recommended ${action} ${status ?? 'network'} no retry/no optimistic/member isolation`, async () => {
+      api.defaults.adapter = recommendedAdapter([recommendedRow(), recommendedRow(40, 2)], c => { const error = failure(c, status); if (status === 422) error.response.data.errors = { product_id: ['此商品已是推薦商品。'] }; throw error }, c => response(c, productPage([{ ...productItem, id: 3 }], 1, 1)))
+      const view = await bannersView(); const section = recommendationRoot(view); await prepareRecommendedAction(view, action)
+      assert.equal(mutations().length, 1); assert.ok(text(section.root).includes('推薦商品1')); assert.ok(find(section.root, el => el.props.role === 'alert'))
+      if (status === 422) assert.ok(text(section.root).includes('此商品已是推薦商品'))
+      assert.equal(auth.currentAdmin.id, admin.id); assert.equal(auth.adminFailureReason, null); assert.equal(view.router.currentRoute.value.path, '/admin/home-content')
+      if (action === 'reorder' && status === 422) { assert.ok(button(section, '選擇推薦商品').props.disabled); await click(section, '重新載入推薦商品'); assert.ok(!button(section, '選擇推薦商品').props.disabled); assert.equal(mutations().length, 1) }
+      recommendedBoundary(); view.app.unmount()
+    })
+  }
+  for (const [status, code] of [[401, undefined], [403, 'ADMIN_ACCOUNT_DISABLED']]) {
+    test(`Recommended ${action} ${status}/${code ?? 'expired'} Admin coordinator only`, async () => {
+      api.defaults.adapter = recommendedAdapter([recommendedRow(), recommendedRow(40, 2)], c => { throw failure(c, status, code) }, c => response(c, productPage([{ ...productItem, id: 3 }], 1, 1)))
+      const view = await bannersView(); await prepareRecommendedAction(view, action); await settle()
+      assert.equal(auth.currentAdmin, null); assert.equal(view.router.currentRoute.value.name, 'admin-login'); assert.equal(mutations().length, 1); assertMemberUntouched(); view.app.unmount()
+    })
+  }
+}
+test('Recommended duplicate 422 retains selector/draft/relation, manual refresh only GET', async () => {
+  api.defaults.adapter = recommendedAdapter([recommendedRow()], c => { const error = failure(c, 422); error.response.data.errors = { product_id: ['此商品已是推薦商品。'] }; throw error }, c => response(c, productPage([{ ...productItem, id: 3 }], 1, 1)))
+  const view = await bannersView(); const section = recommendationRoot(view); await click(section, '選擇推薦商品'); await inputValue(section, 'recommended-search', '保留搜尋')
+  await click(section, '加入推薦'); assert.equal(find(section.root, el => el.props.id === 'recommended-search').value, '保留搜尋'); assert.ok(text(section.root).includes('此商品已是推薦商品')); assert.ok(!button(section, '加入推薦').props.disabled)
+  await click(section, '重新載入推薦商品'); assert.equal(mutations().length, 1); assert.equal(recommendationCalls().filter(c => c.method === 'get').length, 2); recommendedBoundary(); view.app.unmount()
+})
+test('Recommended success + refresh failure keeps success/stale list, disables mutation; retry only GET', async () => {
+  let get = 0
+  api.defaults.adapter = recommendedAdapter(); const base = api.defaults.adapter
+  api.defaults.adapter = c => c.url === '/admin/recommended-products' && c.method === 'get' && ++get === 2 ? (calls.push(c), Promise.reject(failure(c, 503))) : base(c)
+  const view = await bannersView(); const section = recommendationRoot(view); await prepareRecommendedAction(view, 'delete')
+  assert.ok(text(section.root).includes('推薦操作成功')); assert.ok(text(section.root).includes('最新推薦資料重新載入失敗')); assert.ok(text(section.root).includes('推薦商品1')); assert.ok(button(section, '選擇推薦商品').props.disabled)
+  assert.ok(!button(view, '新增輪播').props.disabled); await click(section, '重新載入推薦商品'); assert.equal(mutations().length, 1); assert.equal(get, 3); assert.ok(!button(section, '選擇推薦商品').props.disabled); recommendedBoundary(); view.app.unmount()
+})
+for (const area of ['banner', 'recommended']) {
+  test(`Home content ${area} GET failure cannot block the other management section`, async () => {
+    api.defaults.adapter = recommendedAdapter(); const base = api.defaults.adapter
+    api.defaults.adapter = c => c.url === (area === 'banner' ? '/admin/banners' : '/admin/recommended-products') ? (calls.push(c), Promise.reject(failure(c, 503))) : base(c)
+    const view = await bannersView()
+    if (area === 'banner') { await prepareRecommendedAction(view, 'delete'); assert.equal(mutations().length, 1) }
+    else { await click(view, '新增輪播'); assert.ok(find(view.root, el => el.props.id === 'banner-title')); assert.equal(mutations().length, 0) }
+    recommendedBoundary(); view.app.unmount()
+  })
+}
+for (const phase of ['list', 'selector']) {
+  for (const [status, code] of [[401, undefined], [403, 'ADMIN_ACCOUNT_DISABLED']]) {
+    test(`Recommended ${phase} GET ${status}/${code ?? 'expired'} uses Admin session coordinator`, async () => {
+      api.defaults.adapter = recommendedAdapter(); const base = api.defaults.adapter
+      api.defaults.adapter = c => c.url === (phase === 'list' ? '/admin/recommended-products' : '/admin/products') ? (calls.push(c), Promise.reject(failure(c, status, code))) : base(c)
+      const view = await bannersView(); if (phase === 'selector') await click(recommendationRoot(view), '選擇推薦商品'); await settle()
+      assert.equal(auth.currentAdmin, null); assert.equal(view.router.currentRoute.value.name, 'admin-login'); assert.equal(mutations().length, 0); assertMemberUntouched(); view.app.unmount()
+    })
+  }
+}
+for (const status of [403, 419, 422, undefined, 500]) {
+  test(`Recommended GET ${status ?? 'network'} no session cleanup, manual retry only`, async () => {
+    api.defaults.adapter = recommendedAdapter(); const base = api.defaults.adapter
+    api.defaults.adapter = c => c.url === '/admin/recommended-products' ? (calls.push(c), Promise.reject(failure(c, status))) : base(c)
+    const view = await bannersView(); const section = recommendationRoot(view)
+    assert.ok(find(section.root, el => el.props.role === 'alert')); assert.equal(auth.currentAdmin.id, admin.id); assert.equal(auth.adminFailureReason, null)
+    assert.equal(recommendationCalls().length, 1); api.defaults.adapter = base; await click(section, '重新載入推薦商品'); assert.ok(text(section.root).includes('推薦商品1'))
+    assert.equal(mutations().length, 0); recommendedBoundary(); view.app.unmount()
+  })
+}
+for (const action of ['add', 'delete', 'reorder']) {
+ for (const outcome of ['success', 'error', 'refresh-success', 'refresh-error']) {
+  test(`Recommended ${action} route leave late ${outcome} cannot navigate/refresh/message another module`, async () => {
+    let finish, get = 0
+    api.defaults.adapter = recommendedAdapter(undefined, undefined, c => response(c, productPage([{ ...productItem, id: 3 }]))); const base = api.defaults.adapter
+    api.defaults.adapter = c => {
+      if (!c.url.startsWith('/admin/recommended-products')) return base(c)
+      calls.push(c)
+      if (c.method === 'get') {
+        if (++get === 1) return Promise.resolve(response(c, { data: [recommendedRow(), recommendedRow(40, 2)] }))
+        return new Promise((resolve, reject) => { finish = () => outcome === 'refresh-error' ? reject(failure(c, 503)) : resolve(response(c, { data: [recommendedRow(99, 99)] })) })
+      }
+      if (outcome.startsWith('refresh')) return Promise.resolve(response(c, { message: '舊推薦成功' }))
+      return new Promise((resolve, reject) => { finish = () => outcome === 'error' ? reject(failure(c, 422)) : resolve(response(c, { message: '舊推薦成功' })) })
+    }
+    const view = await bannersView()
+    await prepareRecommendedAction(view, action); await view.router.push('/admin/orders'); await settle(); finish(); await settle()
+    assert.equal(view.router.currentRoute.value.path, '/admin/orders'); assert.ok(!text(view.root).includes('舊推薦成功')); assert.ok(!text(view.root).includes('推薦商品99')); assert.equal(mutations().length, 1); assertMemberUntouched(); view.app.unmount()
+  })
+ }
 }
 
 test('獨立 transport／service：CSRF→login、me、logout 及四欄 envelope', async () => {
@@ -589,7 +776,7 @@ test('Admin-only 八模組保持階段對照，products／inventory／categories
     else { assert.ok(text(main).includes('尚未實作')); assert.ok(text(main).includes('Stage ' + item.stage)) }
   }
   assert.deepEqual(routes.adminModules.map((item) => item.stage), [24, 19, 20, 19, 21, 21, 22, 23])
-  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/banners', '/admin/categories', '/admin/inventory', '/admin/orders', '/admin/products', '/admin/users', '/categories', '/categories']); assert.equal(member.currentUser, null)
+  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/banners', '/admin/categories', '/admin/inventory', '/admin/orders', '/admin/products', '/admin/recommended-products', '/admin/users', '/categories', '/categories']); assert.equal(member.currentUser, null)
   const frontLink = find(view.root, (el) => el.type === 'a' && el.props.href === '/')
   assert.ok(frontLink); assert.equal(frontLink.props.onClick, undefined)
   const menu = find(view.root, (el) => el.type === 'button' && text(el) === '選單')

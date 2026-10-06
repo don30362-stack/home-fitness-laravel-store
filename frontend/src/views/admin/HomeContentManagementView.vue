@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { getAdminBanners, createAdminBanner, updateAdminBanner, updateAdminBannerStatus, reorderAdminBanners, deleteAdminBanner } from '@/services/adminHomeContentService'
 import type { AdminBanner, BannerForm } from '@/types/adminHomeContent'
+import RecommendedProductManager from '@/components/admin/RecommendedProductManager.vue'
 
 const banners = ref<AdminBanner[]>([])
 const workingIds = ref<number[]>([])
@@ -155,7 +156,7 @@ onBeforeUnmount(() => { disposed = true; sequence++; releasePreview() })
         </div>
       </article>
     </div>
-    <h2 class="h4 mt-4">推薦商品</h2><p>推薦商品管理將於後續步驟完成。</p>
+    <RecommendedProductManager />
   </section>
 </template>
 <style scoped>

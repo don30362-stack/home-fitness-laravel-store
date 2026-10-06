@@ -1,4 +1,5 @@
 import type { ApiResponse, ApiMessageResponse } from './api'
+import type { AdminProductListItem } from './adminProduct'
 
 export type BannerStatus = 'active' | 'inactive'
 export interface AdminBanner {
@@ -26,3 +27,16 @@ export interface ReorderBannerPayload { ids: number[] }
 export interface BannerForm extends BannerFields { image: File | null; status: BannerStatus }
 export type AdminBannerListResponse = ApiResponse<AdminBanner[]>
 export type AdminBannerMutationResponse = ApiMessageResponse<AdminBanner>
+
+export interface AdminRecommendedProduct {
+  id: number
+  product_id: number
+  sort_order: number
+  is_publicly_visible: boolean
+  unavailable_reason: string | null
+  product: AdminProductListItem | null
+}
+export type AdminRecommendedProductListResponse = ApiResponse<AdminRecommendedProduct[]>
+export type AdminRecommendedProductMutationResponse = ApiMessageResponse<AdminRecommendedProduct>
+export interface CreateRecommendedProductPayload { product_id: number }
+export interface ReorderRecommendedProductsPayload { ids: number[] }

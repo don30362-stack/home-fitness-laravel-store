@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AddressController;
 use App\Http\Controllers\Api\AdminAuthController;
 use App\Http\Controllers\Api\AdminBannerController;
+use App\Http\Controllers\Api\AdminRecommendedProductController;
 use App\Http\Controllers\Api\AdminCategoryController;
 use App\Http\Controllers\Api\AdminInventoryController;
 use App\Http\Controllers\Api\AdminOrderController;
@@ -59,6 +60,10 @@ Route::prefix('admin')->group(function () {
         Route::post('/logout', [AdminAuthController::class, 'logout']);
         Route::get('/me', [AdminAuthController::class, 'me'])->middleware('admin.active');
         Route::middleware('admin.active')->group(function () {
+            Route::get('/recommended-products', [AdminRecommendedProductController::class, 'index']);
+            Route::post('/recommended-products', [AdminRecommendedProductController::class, 'store']);
+            Route::patch('/recommended-products/order', [AdminRecommendedProductController::class, 'order']);
+            Route::delete('/recommended-products/{id}', [AdminRecommendedProductController::class, 'destroy'])->whereNumber('id');
             Route::get('/banners', [AdminBannerController::class, 'index']);
             Route::post('/banners', [AdminBannerController::class, 'store']);
             Route::patch('/banners/order', [AdminBannerController::class, 'order']);
