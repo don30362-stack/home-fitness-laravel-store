@@ -16,16 +16,14 @@ import AdminProductDetailView from '@/views/admin/AdminProductDetailView.vue'
 import AdminProductFormView from '@/views/admin/AdminProductFormView.vue'
 import { setAdminNavigationCallbacks } from '@/services/adminSessionNavigation'
 
-export const adminModules = [
-  { path: 'dashboard', title: 'Dashboard', stage: 24 },
-  { path: 'products', title: '商品管理', stage: 19 },
-  { path: 'categories', title: '分類管理', stage: 20 },
-  { path: 'inventory', title: '庫存管理', stage: 19 },
-  { path: 'orders', title: '訂單管理', stage: 21 },
-  { path: 'users', title: '會員管理', stage: 21 },
-  { path: 'home-content', title: '首頁內容', stage: 22 },
-  { path: 'admins', title: '管理員管理', stage: 23 },
-]
+import { adminModules } from './adminModules'
+export { adminModules } from './adminModules'
+import AdminForbiddenView from '@/views/admin/AdminForbiddenView.vue'
+import type { AdminPermissionCode } from '@/types/adminAuth'
+
+declare module 'vue-router' {
+  interface RouteMeta { adminPermission?: AdminPermissionCode }
+}
 
 export const safeAdminRedirect = (value: unknown): string => {
   const fallback = '/admin/dashboard'
@@ -47,13 +45,14 @@ export const adminRoutes: RouteRecordRaw[] = [
       ...adminModules.map((module) => ({
         path: module.path, name: 'admin-' + module.path,
         component: module.path === 'products' ? ProductManagementView : module.path === 'inventory' ? InventoryManagementView : module.path === 'categories' ? CategoryManagementView : module.path === 'orders' ? OrderManagementView : module.path === 'users' ? MemberManagementView : module.path === 'home-content' ? HomeContentManagementView : AdminPlaceholderView,
-        props: ['products', 'inventory', 'categories', 'orders', 'users', 'home-content'].includes(module.path) ? undefined : { title: module.title, stage: module.stage }, meta: { requiresAdmin: true },
+        props: ['products', 'inventory', 'categories', 'orders', 'users', 'home-content'].includes(module.path) ? undefined : { title: module.title, stage: module.stage }, meta: { requiresAdmin: true, adminPermission: module.permission },
       })),
-      { path: 'products/new', name: 'admin-product-create', component: AdminProductFormView, meta: { requiresAdmin: true } },
-      { path: 'products/:id/edit', name: 'admin-product-edit', component: AdminProductFormView, meta: { requiresAdmin: true } },
-      { path: 'products/:id', name: 'admin-product-detail', component: AdminProductDetailView, meta: { requiresAdmin: true } },
-      { path: 'orders/:id', name: 'admin-order-detail', component: AdminOrderDetailView, meta: { requiresAdmin: true } },
-      { path: 'users/:id', name: 'admin-user-detail', component: AdminUserDetailView, meta: { requiresAdmin: true } },
+      { path: 'products/new', name: 'admin-product-create', component: AdminProductFormView, meta: { requiresAdmin: true, adminPermission: 'product_manage' } },
+      { path: 'products/:id/edit', name: 'admin-product-edit', component: AdminProductFormView, meta: { requiresAdmin: true, adminPermission: 'product_manage' } },
+      { path: 'products/:id', name: 'admin-product-detail', component: AdminProductDetailView, meta: { requiresAdmin: true, adminPermission: 'product_manage' } },
+      { path: 'orders/:id', name: 'admin-order-detail', component: AdminOrderDetailView, meta: { requiresAdmin: true, adminPermission: 'order_manage' } },
+      { path: 'users/:id', name: 'admin-user-detail', component: AdminUserDetailView, meta: { requiresAdmin: true, adminPermission: 'member_manage' } },
+      { path: 'forbidden', name: 'admin-forbidden', component: AdminForbiddenView, meta: { requiresAdmin: true } },
       { path: ':pathMatch(.*)*', name: 'admin-not-found', component: AdminNotFoundView, meta: { requiresAdmin: true } },
     ],
   },
@@ -68,6 +67,7 @@ export const adminGuard: NavigationGuard = async (to) => {
   if (auth.restoreError) return true
   if (to.name === 'admin-login') return auth.isAdminAuthenticated ? '/admin/dashboard' : true
   if (!auth.isAdminAuthenticated) return { name: 'admin-login', query: { redirect: to.fullPath } }
+  if (to.meta.adminPermission && !auth.hasPermission(to.meta.adminPermission)) return { name: 'admin-forbidden' }
   return true
 }
 
@@ -81,6 +81,15 @@ export const connectAdminNavigation = (router: Router) => {
     await router.replace({ name: 'admin-login', query: { redirect: safeAdminRedirect(router.currentRoute.value.fullPath) } })
   }
   setAdminNavigationCallbacks({
+    permissionContext: () => router.currentRoute.value.fullPath,
+    permissionsChanged: async (context, refreshFailed) => {
+      const current = router.currentRoute.value
+      if (current.fullPath !== context || !current.meta.requiresAdmin || current.name === 'admin-forbidden') return
+      const auth = useAdminAuthStore()
+      if (auth.isAdminAuthenticated && (refreshFailed || (current.meta.adminPermission && !auth.hasPermission(current.meta.adminPermission)))) {
+        await router.replace({ name: 'admin-forbidden' })
+      }
+    },
     loginRequired,
     loginSucceeded: async () => { await router.replace(safeAdminRedirect(router.currentRoute.value.query.redirect)) },
   })

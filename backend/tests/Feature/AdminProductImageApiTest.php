@@ -23,6 +23,14 @@ class AdminProductImageApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function permissionAdmin(array $attributes = []): \App\Models\Admin
+    {
+        $this->seed(\Database\Seeders\PermissionSeeder::class);
+        $admin = \App\Models\Admin::factory()->create($attributes);
+        $admin->permissions()->attach(\App\Models\Permission::query()->where('code', 'product_manage')->value('id'));
+        return $admin;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -39,7 +47,7 @@ class AdminProductImageApiTest extends TestCase
 
     private function login(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
     }
 
     private function file(string $extension = 'jpg', ?string $name = null): UploadedFile
@@ -463,7 +471,7 @@ class AdminProductImageApiTest extends TestCase
     public function test_admin_image_request_does_not_run_disabled_member_c06(): void
     {
         $member = User::factory()->create(['password' => 'member-fixture']);
-        $admin = Admin::factory()->create(['password' => 'admin-fixture']);
+        $admin = $this->permissionAdmin(['password' => 'admin-fixture']);
         $product = $this->product();
         $member->cart()->create()->items()->create(['product_id' => $product->id, 'quantity' => 1]);
         $this->postJson('/api/login', ['email' => $member->email, 'password' => 'member-fixture'])->assertOk();

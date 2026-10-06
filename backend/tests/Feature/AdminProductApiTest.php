@@ -16,6 +16,14 @@ class AdminProductApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function permissionAdmin(array $attributes = []): \App\Models\Admin
+    {
+        $this->seed(\Database\Seeders\PermissionSeeder::class);
+        $admin = \App\Models\Admin::factory()->create($attributes);
+        $admin->permissions()->attach(\App\Models\Permission::query()->where('code', 'product_manage')->value('id'));
+        return $admin;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -73,7 +81,7 @@ class AdminProductApiTest extends TestCase
     public function test_admin_read_does_not_run_member_c06_or_change_public_product_contract(): void
     {
         $user = User::factory()->create(['password' => 'test-member-secret']);
-        $admin = Admin::factory()->create(['password' => 'test-admin-secret']);
+        $admin = $this->permissionAdmin(['password' => 'test-admin-secret']);
         $this->postJson('/api/login', ['email' => $user->email, 'password' => 'test-member-secret'])->assertOk();
         $this->nextRequest();
         $this->postJson('/api/admin/login', ['email' => $admin->email, 'password' => 'test-admin-secret'])->assertOk();
@@ -231,7 +239,7 @@ class AdminProductApiTest extends TestCase
 
     private function login(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
     }
 
     private function nextRequest(): void

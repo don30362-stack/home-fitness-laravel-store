@@ -2,13 +2,14 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import axios from 'axios'
 import type { ApiErrorResponse } from '@/types/api'
-import type { Admin, AdminLoginPayload } from '@/types/adminAuth'
+import type { Admin, AdminLoginPayload, AdminPermissionCode } from '@/types/adminAuth'
 import { loginAdmin, getCurrentAdmin, logoutAdmin } from '@/services/adminAuthService'
 import {
   AdminSessionInvalidatedError, getAdminGeneration, ensureAdminGeneration,
   startAdminGeneration, setAdminFailureHandler, type AdminFailureReason,
 } from '@/services/adminSessionState'
-import { requestAdminLogin } from '@/services/adminSessionNavigation'
+import { requestAdminLogin, notifyAdminPermissionsChanged } from '@/services/adminSessionNavigation'
+import { setAdminPermissionDeniedHandler } from '@/services/adminPermissionState'
 
 type RestoreResult = 'authenticated' | 'guest' | 'disabled' | 'stale'
 
@@ -20,12 +21,17 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
   const adminFailureReason = ref<AdminFailureReason | null>(null)
   const adminFailureMessage = ref<string | null>(null)
   const isAdminAuthenticated = computed(() => currentAdmin.value !== null)
+  const permissionRefreshError = ref<string | null>(null)
+  const isRefreshingPermissions = ref(false)
+  const hasPermission = (code: AdminPermissionCode) => currentAdmin.value?.permissions.includes(code) ?? false
+  let pendingIdentityRefresh: Promise<RestoreResult> | null = null
   let pendingRestore: Promise<RestoreResult> | null = null
 
   const reset = (reason: AdminFailureReason | null = null, message: string | null = null) => {
     currentAdmin.value = null
     isAdminInitialized.value = true
     restoreError.value = null
+    permissionRefreshError.value = null
     if (adminFailureReason.value !== 'disabled' || reason === 'disabled') {
       adminFailureReason.value = reason
       adminFailureMessage.value = message
@@ -44,12 +50,17 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
   const clearAdminSession = () => {
     startAdminGeneration()
     pendingRestore = null
+    pendingIdentityRefresh = null
+    isRefreshingPermissions.value = false
     isRestoring.value = false
     adminFailureReason.value = null
     reset()
   }
   const login = async (payload: AdminLoginPayload) => {
     const attempt = startAdminGeneration()
+    pendingIdentityRefresh = null
+    isRefreshingPermissions.value = false
+    permissionRefreshError.value = null
     pendingRestore = null
     isRestoring.value = false
     const response = await loginAdmin(payload)
@@ -99,6 +110,8 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
   }
   const logout = async () => {
     const expected = startAdminGeneration()
+    pendingIdentityRefresh = null
+    isRefreshingPermissions.value = false
     pendingRestore = null
     isRestoring.value = false
     try {
@@ -113,6 +126,44 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
     return true
   }
 
+  // Unlike initial restore, temporary failure must retain the established identity.
+  const refreshAdminIdentity = (): Promise<RestoreResult> => {
+    if (pendingIdentityRefresh) return pendingIdentityRefresh
+    const expected = getAdminGeneration()
+    isRefreshingPermissions.value = true
+    permissionRefreshError.value = null
+    const operation = (async (): Promise<RestoreResult> => {
+      try {
+        const response = await getCurrentAdmin()
+        ensureAdminGeneration(expected)
+        currentAdmin.value = response.data
+        return 'authenticated'
+      } catch (error) {
+        if (axios.isAxiosError<ApiErrorResponse>(error)) {
+          if (error.response?.status === 401) return 'guest'
+          if (error.response?.status === 403 && error.response.data?.code === 'ADMIN_ACCOUNT_DISABLED') return 'disabled'
+        }
+        if (expected !== getAdminGeneration() || error instanceof AdminSessionInvalidatedError) return 'stale'
+        permissionRefreshError.value = '無法更新管理員權限資料，請手動重試。'
+        return 'stale'
+      }
+    })().finally(() => {
+      if (pendingIdentityRefresh === operation) {
+        pendingIdentityRefresh = null
+        isRefreshingPermissions.value = false
+      }
+    })
+    pendingIdentityRefresh = operation
+    return operation
+  }
+  setAdminPermissionDeniedHandler(async (expected, context) => {
+    if (expected !== getAdminGeneration()) return
+    await refreshAdminIdentity()
+    if (expected !== getAdminGeneration()) return
+    await notifyAdminPermissionsChanged(context, Boolean(permissionRefreshError.value))
+  })
+
   return { currentAdmin, isAdminAuthenticated, isAdminInitialized, isRestoring, restoreError,
-    adminFailureReason, adminFailureMessage, login, restoreAdmin, logout, clearAdminSession }
+    adminFailureReason, adminFailureMessage, login, restoreAdmin, logout, clearAdminSession,
+    hasPermission, permissionRefreshError, isRefreshingPermissions, refreshAdminIdentity }
 })

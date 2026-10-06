@@ -21,6 +21,14 @@ class AdminBannerApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function permissionAdmin(array $attributes = []): \App\Models\Admin
+    {
+        $this->seed(\Database\Seeders\PermissionSeeder::class);
+        $admin = \App\Models\Admin::factory()->create($attributes);
+        $admin->permissions()->attach(\App\Models\Permission::query()->where('code', 'home_content_manage')->value('id'));
+        return $admin;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -29,7 +37,7 @@ class AdminBannerApiTest extends TestCase
         Storage::fake('public');
     }
 
-    private function login(): void { $this->actingAs(Admin::factory()->create(), 'admin'); }
+    private function login(): void { $this->actingAs($this->permissionAdmin(), 'admin'); }
     private function file(string $ext = 'jpg', ?string $name = null): UploadedFile
     {
         return new UploadedFile(base_path('tests/Fixtures/product-images/sample.'.$ext), $name ?? 'client-original.'.$ext, null, UPLOAD_ERR_OK, true);
@@ -364,6 +372,6 @@ class AdminBannerApiTest extends TestCase
         $this->patchJson('/api/admin/banners/999/status', ['status' => 'active'])->assertNotFound();
         $routes = collect(app('router')->getRoutes())->filter(fn ($r) => str_starts_with($r->uri(), 'api/admin/banners'));
         $this->assertCount(6, $routes);
-        foreach ($routes as $route) $this->assertSame(['api', 'auth:admin', 'admin.active'], $route->gatherMiddleware());
+        foreach ($routes as $route) $this->assertSame(['api', 'auth:admin', 'admin.active', 'admin.permission:home_content_manage'], $route->gatherMiddleware());
     }
 }

@@ -20,6 +20,14 @@ class AdminProductMutationApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function permissionAdmin(array $attributes = []): \App\Models\Admin
+    {
+        $this->seed(\Database\Seeders\PermissionSeeder::class);
+        $admin = \App\Models\Admin::factory()->create($attributes);
+        $admin->permissions()->attach(\App\Models\Permission::query()->where('code', 'product_manage')->value('id'));
+        return $admin;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -46,7 +54,7 @@ class AdminProductMutationApiTest extends TestCase
 
     private function login(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
     }
 
     private function variant(Product $product, string $value = '黑'): ProductVariant
@@ -297,7 +305,7 @@ class AdminProductMutationApiTest extends TestCase
         $user = User::factory()->create(['password' => 'test-member-secret']);
         $cart = $user->cart()->create();
         $cart->items()->create(['product_id' => $product->id, 'product_variant_id' => $variant?->id, 'quantity' => 1]);
-        $admin = Admin::factory()->create(['password' => 'test-admin-secret']);
+        $admin = $this->permissionAdmin(['password' => 'test-admin-secret']);
         $this->postJson('/api/admin/login', ['email' => $admin->email, 'password' => 'test-admin-secret'])->assertOk();
         $this->nextRequest();
         $this->patchJson('/api/admin/products/'.$product->id.'/status', ['status' => $status])->assertOk();
@@ -325,7 +333,7 @@ class AdminProductMutationApiTest extends TestCase
         $user = User::factory()->create(['password' => 'test-member-secret']);
         $product = $this->product();
         $user->cart()->create()->items()->create(['product_id' => $product->id, 'quantity' => 1]);
-        $admin = Admin::factory()->create(['password' => 'test-admin-secret']);
+        $admin = $this->permissionAdmin(['password' => 'test-admin-secret']);
         $this->postJson('/api/login', ['email' => $user->email, 'password' => 'test-member-secret'])->assertOk();
         $this->nextRequest();
         $this->postJson('/api/admin/login', ['email' => $admin->email, 'password' => 'test-admin-secret'])->assertOk();

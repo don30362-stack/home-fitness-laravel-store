@@ -17,11 +17,19 @@ use Tests\TestCase;
 class AdminRecommendedProductApiTest extends TestCase
 {
     use RefreshDatabase;
+    private function permissionAdmin(array $attributes = []): \App\Models\Admin
+    {
+        $this->seed(\Database\Seeders\PermissionSeeder::class);
+        $admin = \App\Models\Admin::factory()->create($attributes);
+        $admin->permissions()->attach(\App\Models\Permission::query()->where('code', 'home_content_manage')->value('id'));
+        return $admin;
+    }
+
     protected function setUp(): void
     {
         parent::setUp(); config(['sanctum.stateful' => ['localhost']]); $this->withHeader('Origin', 'http://localhost');
     }
-    private function login(): void { $this->actingAs(Admin::factory()->create(), 'admin'); }
+    private function login(): void { $this->actingAs($this->permissionAdmin(), 'admin'); }
     private function product(array $data = []): Product
     {
         $parent = Category::create(['name' => '主分類', 'status' => 'active']);
@@ -142,7 +150,7 @@ class AdminRecommendedProductApiTest extends TestCase
     }
     public function test_remove_uses_relation_id_only_and_preserves_catalog_member_cart(): void
     {
-        $member = User::factory()->create(); $this->actingAs($member, 'web'); $this->actingAs(Admin::factory()->create(), 'admin');
+        $member = User::factory()->create(); $this->actingAs($member, 'web'); $this->actingAs($this->permissionAdmin(), 'admin');
         $this->product(); $product = $this->product(); $row = $this->relation($product); $before = $product->fresh()->getAttributes();
         $member->cart()->create()->items()->create(['product_id' => $product->id, 'quantity' => 1]);
         $this->assertNotSame($product->id, $row->id);
@@ -235,13 +243,13 @@ class AdminRecommendedProductApiTest extends TestCase
             }
         }
         $this->assertSame($counts['admin'][0], $counts['admin'][1]); $this->assertSame($counts['public'][0], $counts['public'][1]);
-        $this->assertSame(5, $counts['admin'][0]); $this->assertSame(3, $counts['public'][0]);
+        $this->assertSame(6, $counts['admin'][0]); $this->assertSame(3, $counts['public'][0]);
     }
     public function test_only_four_protected_routes_no_selector_status_or_patch_item(): void
     {
         $routes = collect(app('router')->getRoutes())->filter(fn ($r) => str_starts_with($r->uri(), 'api/admin/recommended-products'));
         $this->assertCount(4, $routes);
-        foreach ($routes as $route) $this->assertSame(['api', 'auth:admin', 'admin.active'], $route->gatherMiddleware());
+        foreach ($routes as $route) $this->assertSame(['api', 'auth:admin', 'admin.active', 'admin.permission:home_content_manage'], $route->gatherMiddleware());
         $this->login(); $this->patchJson('/api/admin/recommended-products/1/status', ['status' => 'active'])->assertNotFound();
         $this->getJson('/api/admin/product-selector')->assertNotFound();
     }

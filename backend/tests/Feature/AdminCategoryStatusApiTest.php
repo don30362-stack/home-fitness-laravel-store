@@ -9,6 +9,14 @@ use Tests\TestCase;
 class AdminCategoryStatusApiTest extends TestCase
 {
     use RefreshDatabase;
+    private function permissionAdmin(array $attributes = []): \App\Models\Admin
+    {
+        $this->seed(\Database\Seeders\PermissionSeeder::class);
+        $admin = \App\Models\Admin::factory()->create($attributes);
+        $admin->permissions()->attach(\App\Models\Permission::query()->where('code', 'category_manage')->value('id'));
+        return $admin;
+    }
+
     protected function setUp(): void { parent::setUp(); config(['sanctum.stateful'=>['localhost']]); $this->withHeader('Origin','http://localhost'); }
     private function path(int|string $id): string { return '/api/admin/categories/'.$id.'/status'; }
     public static function invalid(): array
@@ -19,7 +27,7 @@ class AdminCategoryStatusApiTest extends TestCase
     public function test_rejects_invalid_or_extra_fields(array $payload): void
     {
         $category=Category::create(['name'=>'root']);
-        $this->actingAs(Admin::factory()->create(),'admin')->patchJson($this->path($category->id),$payload)->assertUnprocessable();
+        $this->actingAs($this->permissionAdmin(),'admin')->patchJson($this->path($category->id),$payload)->assertUnprocessable();
         $this->assertDatabaseHas('categories',['id'=>$category->id,'status'=>'active','name'=>'root']);
     }
     public function test_guest_and_member_cannot_mutate(): void
@@ -47,7 +55,7 @@ class AdminCategoryStatusApiTest extends TestCase
         $products=[];
         foreach (['active','inactive','disabled'] as $status) $products[]=Product::factory()->create(['category_id'=>$child->id,'status'=>$status,'stock'=>10]);
         $variant=ProductVariant::create(['product_id'=>$products[0]->id,'option_name'=>'色','option_value'=>'黑','stock'=>4,'status'=>'inactive']);
-        $this->actingAs(Admin::factory()->create(),'admin');
+        $this->actingAs($this->permissionAdmin(),'admin');
         foreach ([$root,$child] as $target) {
             foreach (['inactive','inactive','active'] as $status) $this->patchJson($this->path($target->id),['status'=>$status])->assertOk()->assertJsonPath('data.status',$status)->assertJsonStructure(['data','message'])->assertJsonMissingPath('success');
         }
@@ -61,7 +69,7 @@ class AdminCategoryStatusApiTest extends TestCase
     }
     public function test_numeric_missing_and_malformed_hierarchy(): void
     {
-        $this->actingAs(Admin::factory()->create(),'admin');
+        $this->actingAs($this->permissionAdmin(),'admin');
         $this->patchJson($this->path('abc'),['status'=>'active'])->assertNotFound();
         $this->patchJson($this->path(999),['status'=>'active'])->assertNotFound();
         $root=Category::create(['name'=>'root']);

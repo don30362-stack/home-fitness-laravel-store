@@ -15,6 +15,14 @@ class AdminUserApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function permissionAdmin(array $attributes = []): \App\Models\Admin
+    {
+        $this->seed(\Database\Seeders\PermissionSeeder::class);
+        $admin = \App\Models\Admin::factory()->create($attributes);
+        $admin->permissions()->attach(\App\Models\Permission::query()->where('code', 'member_manage')->value('id'));
+        return $admin;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -53,14 +61,14 @@ class AdminUserApiTest extends TestCase
         $this->assertAuthenticatedAs($member, 'web');
         $this->assertDatabaseHas('carts', ['id' => $cart->id]);
         Auth::forgetGuards();
-        $this->actingAs($member, 'web')->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($member, 'web')->actingAs($this->permissionAdmin(), 'admin');
         Auth::shouldUse('web');
         $this->getJson($url)->assertOk();
     }
 
     public function test_empty_and_explicit_resource_privacy(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
         $this->getJson('/api/admin/users')->assertOk()->assertJsonCount(0, 'data')->assertJsonPath('meta.per_page', 10);
         $user = User::factory()->create();
         $user->cart()->create();
@@ -78,7 +86,7 @@ class AdminUserApiTest extends TestCase
 
     public function test_grouped_search_status_filters_include_legacy(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
         $active = User::factory()->create(['name' => 'Needle active', 'email' => 'active@example.test']);
         $disabled = User::factory()->create(['name' => 'Needle disabled', 'email' => 'needle-disabled@example.test', 'status' => 'disabled']);
         $legacy = User::factory()->create(['name' => 'legacy', 'status' => 'inactive']);
@@ -93,7 +101,7 @@ class AdminUserApiTest extends TestCase
 
     public function test_fixed_pagination_and_stable_creation_order(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
         $users = User::factory()->count(11)->create(['created_at' => '2026-01-01']);
         $old = User::factory()->create(['created_at' => '2025-01-01']);
         $expected = array_reverse($users->modelKeys());
@@ -104,7 +112,7 @@ class AdminUserApiTest extends TestCase
 
     public function test_history_owner_stable_order_and_real_order_page(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
         $user = User::factory()->create();
         $ids = [];
         for ($i = 0; $i < 11; $i++) $ids[] = $this->order($user, ['created_at' => '2026-01-01'])->id;
@@ -127,12 +135,12 @@ class AdminUserApiTest extends TestCase
     #[DataProvider('invalidQueries')]
     public function test_list_validation(string $query, string $field): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin')->getJson('/api/admin/users?'.$query)->assertUnprocessable()->assertJsonValidationErrors($field);
+        $this->actingAs($this->permissionAdmin(), 'admin')->getJson('/api/admin/users?'.$query)->assertUnprocessable()->assertJsonValidationErrors($field);
     }
 
     public function test_detail_validation_and_numeric_404(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
         $id = User::factory()->create()->id;
         foreach (['0', 'no', '1.5', '-1', ''] as $page) {
             if ($page === '') continue; // omitted/nullable follows existing Laravel query style.
@@ -145,7 +153,7 @@ class AdminUserApiTest extends TestCase
 
     public function test_query_counts_are_constant_without_catalog_or_business_relations(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
         $user = User::factory()->create();
         $this->order($user);
         $connection = DB::connection(); $connection->enableQueryLog();
@@ -166,8 +174,8 @@ class AdminUserApiTest extends TestCase
         $connection->disableQueryLog();
         $this->assertSame($listCounts[0], $listCounts[1]);
         $this->assertSame($detailCounts[0], $detailCounts[1]);
-        $this->assertSame(3, $listCounts[0]); // admin.active + count + user page.
-        $this->assertSame(4, $detailCounts[0]); // admin.active + user + order count + order page.
+        $this->assertSame(4, $listCounts[0]); // admin.active + permission existence + count + user page.
+        $this->assertSame(5, $detailCounts[0]); // admin.active + permission existence + user + order count + order page.
     }
 
     public function test_users_routes_are_exactly_three_protected_numeric_endpoints(): void
@@ -176,7 +184,7 @@ class AdminUserApiTest extends TestCase
         foreach (app('router')->getRoutes() as $route) {
             if (! str_starts_with($route->uri(), 'api/admin/users')) continue;
             $paths[$route->uri()] = $route->methods();
-            $this->assertSame(['api', 'auth:admin', 'admin.active'], $route->gatherMiddleware());
+            $this->assertSame(['api', 'auth:admin', 'admin.active', 'admin.permission:member_manage'], $route->gatherMiddleware());
             if (str_contains($route->uri(), '{id}')) $this->assertSame('[0-9]+', $route->wheres['id']);
         }
         $this->assertSame(['api/admin/users' => ['GET', 'HEAD'], 'api/admin/users/{id}' => ['GET', 'HEAD'], 'api/admin/users/{id}/status' => ['PATCH']], $paths);

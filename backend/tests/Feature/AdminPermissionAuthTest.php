@@ -168,7 +168,7 @@ class AdminPermissionAuthTest extends TestCase
         $this->assertDatabaseHas('users', ['id' => $user->id, 'status' => 'disabled']);
     }
 
-    public function test_business_routes_remain_unmapped_and_factory_has_no_implicit_permissions(): void
+    public function test_business_routes_are_mapped_and_factory_has_no_implicit_permissions(): void
     {
         $admin = Admin::factory()->create();
         $this->assertCount(0, $admin->permissions);
@@ -179,9 +179,7 @@ class AdminPermissionAuthTest extends TestCase
                 ! in_array($uri, ['api/admin/login', 'api/admin/logout', 'api/admin/me'], true)) {
                 $this->assertContains('auth:admin', $route->gatherMiddleware());
                 $this->assertContains('admin.active', $route->gatherMiddleware());
-                foreach ($route->gatherMiddleware() as $middleware) {
-                    $this->assertFalse(str_starts_with($middleware, 'admin.permission'));
-                }
+                $this->assertCount(1, array_filter($route->gatherMiddleware(), fn ($middleware) => str_starts_with($middleware, 'admin.permission:')));
                 $count++;
             }
         }

@@ -20,6 +20,14 @@ class AdminOrderMutationApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function permissionAdmin(array $attributes = []): \App\Models\Admin
+    {
+        $this->seed(\Database\Seeders\PermissionSeeder::class);
+        $admin = \App\Models\Admin::factory()->create($attributes);
+        $admin->permissions()->attach(\App\Models\Permission::query()->where('code', 'order_manage')->value('id'));
+        return $admin;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -41,7 +49,7 @@ class AdminOrderMutationApiTest extends TestCase
 
     private function login(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
     }
 
     public static function endpoints(): array
@@ -73,7 +81,7 @@ class AdminOrderMutationApiTest extends TestCase
     public function test_real_shared_session_mutations_bypass_disabled_member_c06_and_preserve_cart(): void
     {
         $member = User::factory()->create(['password' => 'test-member-secret']);
-        $admin = Admin::factory()->create(['password' => 'test-admin-secret']);
+        $admin = $this->permissionAdmin(['password' => 'test-admin-secret']);
         $this->postJson('/api/login', ['email' => $member->email, 'password' => 'test-member-secret'])->assertOk();
         Auth::forgetGuards(); Auth::shouldUse('web');
         $this->postJson('/api/admin/login', ['email' => $admin->email, 'password' => 'test-admin-secret'])->assertOk();

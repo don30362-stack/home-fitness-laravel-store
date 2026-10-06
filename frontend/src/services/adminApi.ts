@@ -1,10 +1,12 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios'
 import type { ApiErrorResponse } from '@/types/api'
+import { getAdminPermissionContext } from './adminSessionNavigation'
+import { reportAdminPermissionDenied } from './adminPermissionState'
 import {
   AdminSessionInvalidatedError, getAdminGeneration, reportAdminFailure,
 } from './adminSessionState'
 
-type AdminRequestConfig = InternalAxiosRequestConfig & { adminGeneration?: number }
+type AdminRequestConfig = InternalAxiosRequestConfig & { adminGeneration?: number; adminPermissionContext?: string }
 const isAdminLogin = (url = '') => /(?:^|\/)admin\/login\/?(?:\?|$)/.test(url)
 const isAdminRequest = (url = '') => /(?:^|\/)admin(?:\/|\?|$)/.test(url)
 
@@ -17,6 +19,7 @@ const adminApi = axios.create({
 
 adminApi.interceptors.request.use((config: AdminRequestConfig) => {
   config.adminGeneration = getAdminGeneration()
+  config.adminPermissionContext = getAdminPermissionContext()
   return config
 })
 adminApi.interceptors.response.use((response) => {
@@ -24,7 +27,7 @@ adminApi.interceptors.response.use((response) => {
     throw new AdminSessionInvalidatedError()
   }
   return response
-}, (error: unknown) => {
+}, async (error: unknown) => {
   if (axios.isAxiosError<ApiErrorResponse>(error)) {
     const config = error.config as AdminRequestConfig | undefined
     const expected = config?.adminGeneration
@@ -38,6 +41,8 @@ adminApi.interceptors.response.use((response) => {
         if (stale) return Promise.reject(new AdminSessionInvalidatedError())
       } else if (expected !== getAdminGeneration()) {
         return Promise.reject(new AdminSessionInvalidatedError())
+      } else if (status === 403 && error.response?.data?.code === 'ADMIN_PERMISSION_DENIED' && !/(?:^|\/)admin\/me\/?(?:\?|$)/.test(config?.url ?? '')) {
+        await reportAdminPermissionDenied(expected, config?.adminPermissionContext ?? '')
       }
       // report 會推進世代；保留本次真正錯誤讓 restore 區分 guest／disabled。
       // 舊錯誤不可再由 store 清理或覆寫新資料。

@@ -18,6 +18,14 @@ class AdminCategoryMutationApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function permissionAdmin(array $attributes = []): \App\Models\Admin
+    {
+        $this->seed(\Database\Seeders\PermissionSeeder::class);
+        $admin = \App\Models\Admin::factory()->create($attributes);
+        $admin->permissions()->attach(\App\Models\Permission::query()->where('code', 'category_manage')->value('id'));
+        return $admin;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -65,7 +73,7 @@ class AdminCategoryMutationApiTest extends TestCase
     public function test_active_admin_mutations_do_not_trigger_disabled_member_c06(): void
     {
         $user = User::factory()->create(['password' => 'member-test-secret']);
-        $admin = Admin::factory()->create(['password' => 'admin-test-secret']);
+        $admin = $this->permissionAdmin(['password' => 'admin-test-secret']);
         $this->postJson('/api/login', ['email' => $user->email, 'password' => 'member-test-secret'])->assertOk();
         $this->nextRequest();
         $this->postJson('/api/admin/login', ['email' => $admin->email, 'password' => 'admin-test-secret'])->assertOk();
@@ -277,7 +285,7 @@ class AdminCategoryMutationApiTest extends TestCase
 
     private function login(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
     }
 
     private function nextRequest(): void

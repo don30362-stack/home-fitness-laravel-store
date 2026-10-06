@@ -21,6 +21,7 @@ globalThis.localStorage = {
 }
 const adminViews = {
   AdminLoginView: '/src/views/admin/AdminLoginView.vue', AdminLayout: '/src/layouts/AdminLayout.vue',
+  AdminForbiddenView: '/src/views/admin/AdminForbiddenView.vue',
   AdminSidebar: '/src/components/admin/AdminSidebar.vue', AdminHeader: '/src/components/admin/AdminHeader.vue',
   AdminPlaceholderView: '/src/views/admin/AdminPlaceholderView.vue', AdminNotFoundView: '/src/views/admin/AdminNotFoundView.vue',
   ProductManagementView: '/src/views/admin/ProductManagementView.vue', AdminProductDetailView: '/src/views/admin/AdminProductDetailView.vue',
@@ -161,7 +162,7 @@ const bannerAdapter = (rows, handler = c => response(c, { data: bannerRow(), mes
   if (c.url === '/admin/recommended-products') return response(c, { data: [] })
   return c.method === 'get' ? response(c, { data: typeof rows === 'function' ? rows() : rows }) : handler(c)
 }
-const bannersView = () => { auth.isAdminInitialized = true; return mountRoute('/admin/home-content') }
+const bannersView = () => { auth.currentAdmin = { ...admin, permissions: ['home_content_manage'] }; auth.isAdminInitialized = true; return mountRoute('/admin/home-content') }
 const bannerFile = async (view, file = new File(['image bytes'], 'original.png', { type: 'image/png' })) => {
   const input = find(view.root, el => el.props.id === 'banner-image')
   input.files = file ? [file] : []; input.props.onChange({ target: input }); await nextTick()
@@ -328,7 +329,7 @@ for (const outcome of ['success', 'error', 'refresh-success', 'refresh-error']) 
       return new Promise((resolve, reject) => { finish = () => outcome === 'error' ? reject(failure(c, 422)) : resolve(response(c, { message: '舊輪播成功' })) })
     }
     const view = await bannersView(); await click(view, '下架'); await click(view, '確認')
-    await view.router.push('/admin/orders'); await settle(); finish(); await settle()
+    auth.currentAdmin.permissions.push('order_manage'); await view.router.push('/admin/orders'); await settle(); finish(); await settle()
     assert.equal(view.router.currentRoute.value.fullPath, '/admin/orders'); assert.ok(!text(view.root).includes('舊輪播成功')); assert.ok(!text(view.root).includes('輪播9'))
     assert.equal(mutations().length, 1); assertMemberUntouched(); view.app.unmount()
   })
@@ -510,7 +511,7 @@ for (const action of ['add', 'delete', 'reorder']) {
       return new Promise((resolve, reject) => { finish = () => outcome === 'error' ? reject(failure(c, 422)) : resolve(response(c, { message: '舊推薦成功' })) })
     }
     const view = await bannersView()
-    await prepareRecommendedAction(view, action); await view.router.push('/admin/orders'); await settle(); finish(); await settle()
+    await prepareRecommendedAction(view, action); auth.currentAdmin.permissions.push('order_manage'); await view.router.push('/admin/orders'); await settle(); finish(); await settle()
     assert.equal(view.router.currentRoute.value.path, '/admin/orders'); assert.ok(!text(view.root).includes('舊推薦成功')); assert.ok(!text(view.root).includes('推薦商品99')); assert.equal(mutations().length, 1); assertMemberUntouched(); view.app.unmount()
   })
  }
@@ -551,9 +552,9 @@ test('Stage23 login saves code permissions; restore replaces the latest identity
   assertMemberUntouched()
 })
 
-test('Stage23 foundation permission denied remains ordinary403, retaining identity and member/cart', async () => {
+test('Stage23 permission denied refreshes identity, retaining session and member/cart', async () => {
   const before = state.getAdminGeneration()
-  api.defaults.adapter = config => Promise.reject(failure(config, 403, 'ADMIN_PERMISSION_DENIED'))
+  api.defaults.adapter = config => { calls.push(config); return config.url === '/admin/me' ? Promise.resolve(response(config, {data: admin})) : Promise.reject(failure(config, 403, 'ADMIN_PERMISSION_DENIED')) }
   await assert.rejects(api.get('/admin/permission-test/single'))
   assert.equal(auth.currentAdmin.id, admin.id)
   assert.deepEqual(auth.currentAdmin.permissions, ['product_manage'])
@@ -785,7 +786,7 @@ for (const path of ['/admin/dashboard', '/admin/orders', '/admin/orders/1', '/ad
   })
 }
 test('Admin-only 八模組保持階段對照，products／inventory／categories 已接真實頁面', async () => {
-  auth.isAdminInitialized = true; member.currentUser = null
+  auth.currentAdmin = { ...admin, permissions: routes.adminModules.flatMap(m => m.permission ? [m.permission] : []) }; auth.isAdminInitialized = true; member.currentUser = null
   const view = await mountRoute('/admin')
   assert.equal(view.router.currentRoute.value.fullPath, '/admin/dashboard')
   assert.ok(find(view.root, (el) => el.type === 'header'))
@@ -812,7 +813,7 @@ test('Admin-only 八模組保持階段對照，products／inventory／categories
 test('reload protected child 先等待 restore，再放行而非先導 login', async () => {
   auth.currentAdmin = null
   let finish
-  api.defaults.adapter = (config) => new Promise((resolve) => { calls.push(config); finish = () => resolve(response(config, { data: admin })) })
+  api.defaults.adapter = (config) => new Promise((resolve) => { calls.push(config); finish = () => resolve(response(config, { data: { ...admin, permissions: ['order_manage'] } })) })
   const instance = memoryRouter(), pending = instance.router.push('/admin/orders')
   await settle(); assert.equal(calls.length, 1); assert.equal(instance.router.currentRoute.value.name, undefined)
   finish(); await pending
@@ -877,6 +878,7 @@ for (const redirect of ['/admin/orders', 'https://evil.com', '//evil.com', '/mem
   test(`真 Router loginSucceeded callback 使用安全 redirect：${redirect}`, async () => {
     auth.currentAdmin = null; auth.isAdminInitialized = true
     const view = await mountRoute('/admin/login?redirect=' + encodeURIComponent(redirect))
+    const base = api.defaults.adapter; api.defaults.adapter = async c => { const result = await base(c); if (c.url === '/admin/login') result.data.data = { ...admin, permissions: ['order_manage'] }; return result }
     await auth.login(payload); await navigation.notifyAdminLoginSuccess(); await settle()
     assert.equal(view.router.currentRoute.value.fullPath, redirect === '/admin/orders' ? redirect : '/admin/dashboard')
     view.app.unmount()
@@ -1427,7 +1429,7 @@ test('舊upload晚到不覆蓋新商品圖片，不發舊商品refresh GET', asy
 const inventoryItem = { stock_owner_type:'product',stock_owner_id:1,product_id:1,product_code:'PRD-INVENTORY',product_name:'庫存啞鈴',product_status:'inactive',category:{id:2,name:'啞鈴'},variant:null,stock:3,low_stock_threshold:5,inventory_status:'low_stock' }
 const inventoryVariant = {...inventoryItem,stock_owner_type:'variant',stock_owner_id:2,product_id:2,variant:{id:2,option_name:'顏色',option_value:'黑色',status:'inactive'},stock:0,inventory_status:'out_of_stock'}
 const inventoryAdapter = (data=[inventoryItem,inventoryVariant]) => async config => { calls.push(config); if(config.url==='/categories')return response(config,{data:categoryOptions}); assert.equal(config.url,'/admin/inventory');assert.equal(config.method,'get');return response(config,productPage(data,Number(config.params?.page||1),2)) }
-const inventoryView = async(url='/admin/inventory')=>{auth.isAdminInitialized=true;return mountRoute(url)}
+const inventoryView = async(url='/admin/inventory')=>{auth.currentAdmin = { ...admin, permissions: ['inventory_manage'] };auth.isAdminInitialized=true;return mountRoute(url)}
 const inventoryPanel = view=>find(view.root,el=>el.props['aria-label']==='庫存調整')
 const submitAdjustment = async view=>{find(inventoryPanel(view),el=>el.type==='form').props.onSubmit({preventDefault(){}});await settle()}
 const assertInventoryCalls=()=>{assert.ok(calls.every(c=>c.url==='/categories'||/^\/admin\/inventory(?:\/(?:variants\/)?\d+)?$/.test(c.url)));assert.ok(calls.every(c=>['get','patch'].includes(c.method)));assertMemberUntouched()}
@@ -1495,6 +1497,7 @@ test('Inventory分類選項失敗可獨立重試，只用公開categories',async
 })
 
 const categoriesView = async () => {
+  auth.currentAdmin = { ...admin, permissions: ['category_manage'] }
   auth.isAdminInitialized = true
   return mountRoute('/admin/categories')
 }
@@ -1600,7 +1603,7 @@ test('離開分類route後晚到GET不覆蓋其他模組，返回時重新讀取
 test('分類protected URL重新開啟先restoreAdmin，再GET管理樹', async () => {
   auth.currentAdmin = null; auth.isAdminInitialized = false
   api.defaults.adapter = async config => { calls.push(config); return response(config,
-    { data: config.url === '/admin/me' ? admin : adminCategoryTree }) }
+    { data: config.url === '/admin/me' ? { ...admin, permissions: ['category_manage'] } : adminCategoryTree }) }
   const view = await mountRoute('/admin/categories')
   assert.equal(view.router.currentRoute.value.name, 'admin-categories')
   assert.deepEqual(calls.map(c => c.url), ['/admin/me', '/admin/categories'])
@@ -1924,6 +1927,7 @@ test('Category DELETE service reuses message-only type and adminApi without body
 
 // Stage 21 Step 1: real SFCs / memory router / Axios adapter; not browser acceptance.
 const ordersView = async (url = '/admin/orders') => {
+  auth.currentAdmin = { ...admin, permissions: ['order_manage'] }
   auth.isAdminInitialized = true
   return mountRoute(url)
 }
@@ -2302,7 +2306,7 @@ test('Old cancel finally cannot unlock newer order mutation or restore its confi
 })
 
 // Stage 21 Step 4: SFC/memory-router tests; not real-browser acceptance.
-const usersView = async (url = '/admin/users') => { auth.isAdminInitialized = true; return mountRoute(url) }
+const usersView = async (url = '/admin/users') => { auth.currentAdmin = { ...admin, permissions: ['member_manage', 'order_manage'] }; auth.isAdminInitialized = true; return mountRoute(url) }
 const userBoundary = () => {
   assert.ok(calls.every(c => c.method === 'get' && /^\/admin\/users(?:\/\d+)?$/.test(c.url) || c.method === 'patch' && /^\/admin\/users\/\d+\/status$/.test(c.url)))
   for (const c of mutations()) assert.ok(['active','disabled'].includes(JSON.parse(c.data).status))
@@ -2494,4 +2498,137 @@ test('User old finally cannot unlock mutation in newer user context',async()=>{
   finish['/admin/users/9/status']();await settle();assert.equal(button(view,'確認變更會員狀態').props.disabled,true)
   button(view,'確認變更會員狀態').props.onClick();await settle();assert.equal(mutations().length,2);assert.ok(!text(view.root).includes('OLD-FINALLY'))
   finish['/admin/users/10/status']();await settle();userBoundary();view.app.unmount()
+})
+// Stage 23 Step 2: module authorization UX; memory renderer, not browser acceptance.
+const permissionPaths = [
+  ['/admin/products', 'product_manage'], ['/admin/products/new', 'product_manage'],
+  ['/admin/products/1', 'product_manage'], ['/admin/products/1/edit', 'product_manage'],
+  ['/admin/categories', 'category_manage'], ['/admin/inventory', 'inventory_manage'],
+  ['/admin/orders', 'order_manage'], ['/admin/orders/1', 'order_manage'],
+  ['/admin/users', 'member_manage'], ['/admin/users/9', 'member_manage'],
+  ['/admin/home-content', 'home_content_manage'], ['/admin/admins', 'admin_manage'],
+]
+for (const [path, permission] of permissionPaths) {
+  test(`Permission deep link ${path}: Forbidden before mount, zero business GET`, async () => {
+    auth.isAdminInitialized = true; auth.currentAdmin = { ...admin, permissions: [] }
+    const view = await mountRoute(path)
+    assert.equal(view.router.currentRoute.value.name, 'admin-forbidden')
+    assert.ok(text(view.root).includes('沒有此功能權限')); assert.equal(calls.length, 0)
+    assertMemberUntouched(); view.app.unmount()
+  })
+  test(`Permission granted ${path}: exact child route metadata and mount`, async () => {
+    auth.isAdminInitialized = true; auth.currentAdmin = { ...admin, permissions: [permission] }
+    const view = await mountRoute(path)
+    assert.equal(view.router.currentRoute.value.path, path)
+    assert.equal(view.router.currentRoute.value.meta.adminPermission, permission)
+    assert.ok(!text(view.root).includes('沒有此功能權限')); view.app.unmount()
+  })
+}
+for (const permissions of [[], ...routes.adminModules.filter(m => m.permission).map(m => [m.permission]), ['product_manage', 'member_manage']]) {
+  test(`Sidebar exact permission projection ${permissions.join(',') || 'empty'}`, async () => {
+    auth.isAdminInitialized = true; auth.currentAdmin = { ...admin, permissions }
+    const view = await mountRoute('/admin/dashboard')
+    for (const module of routes.adminModules) {
+      assert.equal(Boolean(find(view.root, el => el.type === 'a' && el.props.href === '/admin/'+module.path)), !module.permission || permissions.includes(module.permission), module.path)
+    }
+    assert.equal(calls.length, 0); assert.ok(find(view.root, el => el.type === 'a' && el.props.href === '/')); view.app.unmount()
+  })
+}
+test('Home-only selector reads existing Product list while Products routes and links remain unavailable', async () => {
+  api.defaults.adapter = recommendedAdapter()
+  const view = await bannersView(); await click(recommendationRoot(view), '選擇推薦商品')
+  assert.ok(calls.some(c => c.url === '/admin/products' && c.method === 'get'))
+  assert.ok(!find(view.root, el => el.type === 'a' && /^\/admin\/products/.test(el.props.href ?? '')))
+  await view.router.push('/admin/products/1'); await settle()
+  assert.equal(view.router.currentRoute.value.name, 'admin-forbidden')
+  assert.ok(!calls.some(c => c.url === '/admin/products/1')); assertMemberUntouched(); view.app.unmount()
+})
+for (const granted of [false, true]) {
+ test(`Member historical orders readable; target order link requires order_manage=${granted}`, async () => {
+  auth.isAdminInitialized = true; auth.currentAdmin = { ...admin, permissions: ['member_manage', ...(granted ? ['order_manage'] : [])] }
+  const view = await mountRoute('/admin/users/9')
+  assert.ok(text(view.root).includes(adminOrderSummary.order_no))
+  assert.equal(Boolean(find(view.root, el => el.type === 'a' && el.props.href === '/admin/orders/1')), granted)
+  assert.ok(!calls.some(c => c.url.startsWith('/admin/orders'))); view.app.unmount()
+ })
+}
+test('Runtime denied mutation refreshes me, replaces Sidebar, sends Forbidden; original PATCH never retried', async () => {
+ auth.isAdminInitialized = true; const view = await mountRoute('/admin/products/1')
+ calls.length = 0
+ api.defaults.adapter = c => { calls.push(c); return c.url === '/admin/me' ? Promise.resolve(response(c, {data: {...admin, permissions: []}})) : Promise.reject(failure(c,403,'ADMIN_PERMISSION_DENIED')) }
+ await assert.rejects(api.patch('/admin/products/1', {name:'attempt'})); await settle()
+ assert.deepEqual(calls.map(c => [c.method,c.url]), [['patch','/admin/products/1'],['get','/admin/me']])
+ assert.equal(view.router.currentRoute.value.name,'admin-forbidden'); assert.deepEqual(auth.currentAdmin.permissions,[])
+ assert.equal(auth.isAdminAuthenticated,true); assert.equal(auth.isAdminInitialized,true)
+ assert.ok(!find(view.root,el => el.type==='a' && el.props.href==='/admin/products')); assertMemberUntouched(); view.app.unmount()
+})
+test('Concurrent permission-denied requests dedupe me and retain original failures', async () => {
+ auth.isAdminInitialized = true; const view = await mountRoute('/admin/products')
+ let finish; calls.length=0
+ api.defaults.adapter = c => { calls.push(c); return c.url==='/admin/me' ? new Promise(resolve => {finish=()=>resolve(response(c,{data:{...admin,permissions:[]}}))}) : Promise.reject(failure(c,403,'ADMIN_PERMISSION_DENIED')) }
+ const outcome=Promise.allSettled([api.patch('/admin/products/1',{}),api.delete('/admin/products/2')]); await settle()
+ assert.equal(calls.filter(c=>c.url==='/admin/me').length,1); finish(); const results=await outcome; await settle()
+ assert.ok(results.every(r=>r.status==='rejected')); assert.equal(calls.length,3); assertMemberUntouched(); view.app.unmount()
+})
+for(const status of [503, undefined]) {
+ test(`Permission refresh ${status ?? 'network'} retains identity/initial state; Forbidden manual retry only me`, async()=>{
+  auth.isAdminInitialized=true; const view=await mountRoute('/admin/products'); calls.length=0
+  api.defaults.adapter=c=>{calls.push(c);return Promise.reject(failure(c,c.url==='/admin/me'?status:403,c.url==='/admin/me'?undefined:'ADMIN_PERMISSION_DENIED'))}
+  await assert.rejects(api.patch('/admin/products/1',{}));await settle()
+  assert.equal(view.router.currentRoute.value.name,'admin-forbidden');assert.equal(auth.isAdminAuthenticated,true);assert.equal(auth.isAdminInitialized,true)
+  assert.equal(auth.restoreError,null);assert.ok(auth.permissionRefreshError);assert.deepEqual(auth.currentAdmin.permissions,['product_manage'])
+  api.defaults.adapter=c=>{calls.push(c);return Promise.resolve(response(c,{data:{...admin,permissions:[]}}))}
+  await click(view,'重試權限資料');assert.equal(auth.permissionRefreshError,null);assert.deepEqual(auth.currentAdmin.permissions,[])
+  assert.equal(calls.filter(c=>c.method==='patch').length,1);assert.equal(calls.filter(c=>c.url==='/admin/me').length,2)
+  assert.equal(view.router.currentRoute.value.name,'admin-forbidden');assertMemberUntouched();view.app.unmount()
+ })
+}
+for(const [status,code,reason] of [[401,undefined,'expired'],[403,'ADMIN_ACCOUNT_DISABLED','disabled']]) {
+ test(`Permission refresh ${status}/${code??''} uses existing session coordinator`,async()=>{
+  auth.isAdminInitialized=true;const view=await mountRoute('/admin/products')
+  api.defaults.adapter=c=>{calls.push(c);return Promise.reject(failure(c,c.url==='/admin/me'?status:403,c.url==='/admin/me'?code:'ADMIN_PERMISSION_DENIED'))}
+  await assert.rejects(api.patch('/admin/products/1',{}));await settle()
+  assert.equal(auth.currentAdmin,null);assert.equal(auth.adminFailureReason,reason);assert.equal(view.router.currentRoute.value.name,'admin-login')
+  assertMemberUntouched();view.app.unmount()
+ })
+}
+for(const status of [403,419,422,undefined,500]) {
+ test(`Ordinary ${status??'network'} does not refresh identity or retry mutation`,async()=>{
+  api.defaults.adapter=c=>{calls.push(c);return Promise.reject(failure(c,status))}
+  await assert.rejects(api.patch('/admin/products/1',{}));assert.equal(calls.length,1)
+  assert.equal(auth.permissionRefreshError,null);assert.equal(auth.adminFailureReason,null);assert.equal(auth.currentAdmin.id,admin.id);assertMemberUntouched()
+ })
+}
+for(const phase of ['denial','refresh']) {
+ test(`Route leave before late ${phase}: no Forbidden/message pollution on new module`,async()=>{
+  auth.isAdminInitialized=true;const view=await mountRoute('/admin/products');let finish
+  api.defaults.adapter=c=>{calls.push(c);if(c.url==='/admin/me')return phase==='refresh'?new Promise(resolve=>{finish=()=>resolve(response(c,{data:{...admin,permissions:[]}}))}):Promise.resolve(response(c,{data:{...admin,permissions:[]}}));return phase==='denial'?new Promise((resolve,reject)=>{finish=()=>reject(failure(c,403,'ADMIN_PERMISSION_DENIED'))}):Promise.reject(failure(c,403,'ADMIN_PERMISSION_DENIED'))}
+  const pending=assert.rejects(api.patch('/admin/products/1',{}));await settle();await view.router.push('/admin/dashboard');await settle();finish();await pending;await settle()
+  assert.equal(view.router.currentRoute.value.name,'admin-dashboard');assert.ok(!text(view.root).includes('沒有此功能權限'));assertMemberUntouched();view.app.unmount()
+ })
+}
+for(const change of ['login','logout']) {
+ test(`Late permission refresh after ${change} cannot overwrite newer generation`,async()=>{
+  let finish;api.defaults.adapter=c=>{calls.push(c);if(c.url==='/admin/me')return new Promise(resolve=>{finish=()=>resolve(response(c,{data:{...admin,permissions:[]}}))});return Promise.resolve(response(c,{data:newer}))}
+  const pending=auth.refreshAdminIdentity();await settle()
+  if(change==='login')await auth.login(payload);else auth.clearAdminSession()
+  finish();await pending
+  assert.equal(auth.currentAdmin?.id??null,change==='login'?newer.id:null);assert.equal(auth.permissionRefreshError,null);assertMemberUntouched()
+ })
+}
+test('Runtime Product GET denial refreshes identity once and never retries failed business GET', async () => {
+ auth.isAdminInitialized=true
+ api.defaults.adapter=c=>{calls.push(c);if(c.url==='/categories')return Promise.resolve(response(c,{data:categoryOptions}));if(c.url==='/admin/me')return Promise.resolve(response(c,{data:{...admin,permissions:[]}}));return Promise.reject(failure(c,403,'ADMIN_PERMISSION_DENIED'))}
+ const view=await mountRoute('/admin/products');await settle()
+ assert.equal(view.router.currentRoute.value.name,'admin-forbidden')
+ assert.equal(calls.filter(c=>c.url==='/admin/products').length,1);assert.equal(calls.filter(c=>c.url==='/admin/me').length,1)
+ assert.equal(auth.isAdminAuthenticated,true);assertMemberUntouched();view.app.unmount()
+})
+test('Manual permission refresh updates grants without returning automatically; subsequent legal module navigation works',async()=>{
+ auth.isAdminInitialized=true;auth.permissionRefreshError='無法更新權限';const view=await mountRoute('/admin/forbidden')
+ api.defaults.adapter=c=>{calls.push(c);return Promise.resolve(response(c,c.url==='/admin/me'?{data:{...admin,permissions:['inventory_manage']}}:c.url==='/categories'?{data:categoryOptions}:productPage([])))}
+ await click(view,'重試權限資料');assert.equal(view.router.currentRoute.value.name,'admin-forbidden')
+ assert.ok(find(view.root,el=>el.type==='a' && el.props.href==='/admin/inventory'))
+ assert.equal(calls.length,1);await view.router.push('/admin/inventory');await settle()
+ assert.equal(view.router.currentRoute.value.name,'admin-inventory');assertMemberUntouched();view.app.unmount()
 })

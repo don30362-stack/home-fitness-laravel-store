@@ -21,6 +21,14 @@ class AdminOrderCancellationApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function permissionAdmin(array $attributes = []): \App\Models\Admin
+    {
+        $this->seed(\Database\Seeders\PermissionSeeder::class);
+        $admin = \App\Models\Admin::factory()->create($attributes);
+        $admin->permissions()->attach(\App\Models\Permission::query()->where('code', 'order_manage')->value('id'));
+        return $admin;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -97,7 +105,7 @@ class AdminOrderCancellationApiTest extends TestCase
     public function test_state_payment_stock_and_snapshot_contract(string $state, string $payment): void
     {
         ['order' => $order, 'user' => $owner, 'plain' => $plain, 'parent' => $parent, 'variant' => $variant] = $this->fixture($state, $payment);
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
         $unchanged = ['categories', 'order_items', 'carts', 'cart_items'];
         $before = $this->snapshot($unchanged);
         $orderBefore = $order->fresh()->getAttributes();
@@ -134,7 +142,7 @@ class AdminOrderCancellationApiTest extends TestCase
     public function test_single_stock_owner_restoration(string $mode): void
     {
         ['order' => $order, 'plain' => $plain, 'variant' => $variant] = $this->fixture(mode: $mode);
-        $this->actingAs(Admin::factory()->create(), 'admin')->postJson('/api/admin/orders/'.$order->id.'/cancel')->assertOk();
+        $this->actingAs($this->permissionAdmin(), 'admin')->postJson('/api/admin/orders/'.$order->id.'/cancel')->assertOk();
         $this->assertSame($mode === 'plain' ? 7 : 5, $plain->fresh()->stock);
         $this->assertSame($mode === 'variant' ? 10 : 7, $variant->fresh()->stock);
     }
@@ -145,14 +153,14 @@ class AdminOrderCancellationApiTest extends TestCase
         $fake = Mockery::mock(OrderCancellationService::class);
         $fake->shouldReceive('cancel')->once()->with($order->id)->andReturn($order->fresh()->load('items'));
         $this->app->instance(OrderCancellationService::class, $fake);
-        $this->actingAs(Admin::factory()->create(), 'admin')->postJson('/api/admin/orders/'.$order->id.'/cancel')->assertOk()
+        $this->actingAs($this->permissionAdmin(), 'admin')->postJson('/api/admin/orders/'.$order->id.'/cancel')->assertOk()
             ->assertJsonPath('data.user.id', $order->user_id);
         $this->assertSame('pending', $order->fresh()->order_status, 'Controller contains no duplicate cancellation logic.');
     }
 
     public function test_missing_and_nonnumeric_ids(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
         foreach (['999999', 'abc', '-1', '1.5'] as $id) $this->postJson('/api/admin/orders/'.$id.'/cancel')->assertNotFound();
     }
 
@@ -160,7 +168,7 @@ class AdminOrderCancellationApiTest extends TestCase
     {
         ['order' => $order, 'user' => $user, 'cart' => $cart] = $this->fixture();
         $user->update(['password' => 'test-member-secret']);
-        $admin = Admin::factory()->create(['password' => 'test-admin-secret']);
+        $admin = $this->permissionAdmin(['password' => 'test-admin-secret']);
         $this->postJson('/api/login', ['email' => $user->email, 'password' => 'test-member-secret'])->assertOk();
         Auth::forgetGuards(); Auth::shouldUse('web');
         $this->postJson('/api/admin/login', ['email' => $admin->email, 'password' => 'test-admin-secret'])->assertOk();
@@ -177,7 +185,7 @@ class AdminOrderCancellationApiTest extends TestCase
     {
         ['order' => $order, 'plain' => $plain, 'variant' => $variant] = $this->fixture();
         $before = $this->snapshot(['orders', 'products', 'product_variants', 'order_items', 'carts', 'cart_items']);
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
         $dispatcher = Order::getEventDispatcher(); Order::setEventDispatcher(clone $dispatcher);
         $reached = false;
         Order::updating(function () use ($plain, $variant, &$reached): void {
@@ -199,7 +207,7 @@ class AdminOrderCancellationApiTest extends TestCase
         // All FKs remain valid, but the item's product and variant no longer refer to the same owner.
         $variant->update(['product_id' => $other->id]);
         $before = $this->snapshot(['orders', 'products', 'product_variants', 'order_items', 'carts', 'cart_items']);
-        $this->actingAs(Admin::factory()->create(), 'admin')->postJson('/api/admin/orders/'.$order->id.'/cancel')
+        $this->actingAs($this->permissionAdmin(), 'admin')->postJson('/api/admin/orders/'.$order->id.'/cancel')
             ->assertUnprocessable()->assertJsonValidationErrors('order');
         $this->assertEquals($before, $this->snapshot(['orders', 'products', 'product_variants', 'order_items', 'carts', 'cart_items']));
         $this->assertSame(5, $plain->fresh()->stock);

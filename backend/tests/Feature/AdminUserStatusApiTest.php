@@ -20,6 +20,14 @@ class AdminUserStatusApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function permissionAdmin(array $attributes = []): Admin
+    {
+        $this->seed(\Database\Seeders\PermissionSeeder::class);
+        $admin = Admin::factory()->create($attributes);
+        $admin->permissions()->attach(\App\Models\Permission::where('code', 'member_manage')->value('id'));
+        return $admin;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -79,7 +87,7 @@ class AdminUserStatusApiTest extends TestCase
     public function test_transition_matrix_and_complete_data_preservation(string $from, string $to, int $http): void
     {
         $user = $this->fixture($from); $before = $this->snapshot(); $attributes = $user->getAttributes();
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
         $response = $this->patchJson('/api/admin/users/'.$user->id.'/status', ['status' => $to])->assertStatus($http)->assertJsonMissingPath('success');
         if ($http === 422) $response->assertJsonValidationErrors('status');
         else $response->assertJsonPath('data.status', $to)->assertJsonPath('message', '會員狀態更新成功。')->assertJsonMissingPath('data.password')->assertJsonMissingPath('data.remember_token');
@@ -101,13 +109,13 @@ class AdminUserStatusApiTest extends TestCase
     public function test_strict_validation(array $payload): void
     {
         $user = $this->fixture(); $before = $user->fresh()->getAttributes();
-        $this->actingAs(Admin::factory()->create(), 'admin')->patchJson('/api/admin/users/'.$user->id.'/status', $payload)->assertUnprocessable();
+        $this->actingAs($this->permissionAdmin(), 'admin')->patchJson('/api/admin/users/'.$user->id.'/status', $payload)->assertUnprocessable();
         $this->assertSame($before, $user->fresh()->getAttributes());
     }
 
     public function test_numeric_and_missing_routes(): void
     {
-        $this->actingAs(Admin::factory()->create(), 'admin');
+        $this->actingAs($this->permissionAdmin(), 'admin');
         $this->patchJson('/api/admin/users/99999/status', ['status' => 'active'])->assertNotFound();
         $this->patchJson('/api/admin/users/no/status', ['status' => 'active'])->assertNotFound();
     }
@@ -135,7 +143,7 @@ class AdminUserStatusApiTest extends TestCase
     {
         // Synthetic malformed fixture only; no daily DB is changed or scanned.
         $user = User::factory()->create(['status' => 'unknown']);
-        $this->actingAs(Admin::factory()->create(), 'admin')->patchJson('/api/admin/users/'.$user->id.'/status', ['status' => 'active'])->assertUnprocessable()->assertJsonValidationErrors('status');
+        $this->actingAs($this->permissionAdmin(), 'admin')->patchJson('/api/admin/users/'.$user->id.'/status', ['status' => 'active'])->assertUnprocessable()->assertJsonValidationErrors('status');
         $this->assertSame('unknown', $user->fresh()->status);
     }
 
@@ -144,7 +152,7 @@ class AdminUserStatusApiTest extends TestCase
     public function test_dual_session_disable_waits_for_member_request_then_restore_requires_relogin(): void
     {
         $user = $this->fixture(); $before = $this->snapshot();
-        $admin = Admin::factory()->create(['password' => 'test-admin-secret']);
+        $admin = $this->permissionAdmin(['password' => 'test-admin-secret']);
         $this->postJson('/api/login', ['email' => $user->email, 'password' => 'test-member-secret'])->assertOk();
         $this->resetGuards();
         $this->postJson('/api/admin/login', ['email' => $admin->email, 'password' => 'test-admin-secret'])->assertOk();

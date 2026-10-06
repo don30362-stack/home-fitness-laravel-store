@@ -13,6 +13,14 @@ class AdminCategoryDeleteApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function permissionAdmin(array $attributes = []): \App\Models\Admin
+    {
+        $this->seed(\Database\Seeders\PermissionSeeder::class);
+        $admin = \App\Models\Admin::factory()->create($attributes);
+        $admin->permissions()->attach(\App\Models\Permission::query()->where('code', 'category_manage')->value('id'));
+        return $admin;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -21,7 +29,7 @@ class AdminCategoryDeleteApiTest extends TestCase
     }
 
     private function path(int|string $id): string { return '/api/admin/categories/'.$id; }
-    private function login(): void { $this->actingAs(Admin::factory()->create(), 'admin'); }
+    private function login(): void { $this->actingAs($this->permissionAdmin(), 'admin'); }
     private function category(array $attributes = []): Category
     {
         return Category::create($attributes + ['name' => 'delete fixture', 'status' => 'active', 'sort_order' => 0]);

@@ -3,6 +3,8 @@ import { getAdminGeneration } from './adminSessionState'
 type NavigationCallbacks = {
   loginRequired?: () => void | Promise<void>
   loginSucceeded?: () => void | Promise<void>
+  permissionContext?: () => string
+  permissionsChanged?: (context: string, refreshFailed: boolean) => void | Promise<void>
 }
 
 let callbacks: NavigationCallbacks = {}
@@ -20,3 +22,7 @@ export const requestAdminLogin = () => {
   })
 }
 export const notifyAdminLoginSuccess = async () => { await callbacks.loginSucceeded?.() }
+export const getAdminPermissionContext = () => callbacks.permissionContext?.() ?? ''
+export const notifyAdminPermissionsChanged = async (context: string, refreshFailed: boolean) => {
+  await callbacks.permissionsChanged?.(context, refreshFailed)
+}
