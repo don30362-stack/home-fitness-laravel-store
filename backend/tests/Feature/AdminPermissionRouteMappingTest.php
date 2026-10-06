@@ -47,6 +47,12 @@ class AdminPermissionRouteMappingTest extends TestCase
             $path = substr($route->uri(), 10);
             $middleware = $route->gatherMiddleware();
             $permissions = array_values(array_filter($middleware, fn ($m) => str_starts_with($m, 'admin.permission:')));
+            if ($path === 'dashboard') {
+                $this->assertSame(['GET', 'HEAD'], $route->methods());
+                $this->assertSame(['api', 'auth:admin', 'admin.active'], $middleware);
+                $this->assertSame([], $permissions);
+                continue;
+            }
             if (in_array($path, ['login', 'logout', 'me'])) {
                 $this->assertSame([], $permissions);
                 if ($path === 'logout') $this->assertNotContains('admin.active', $middleware);
@@ -61,7 +67,7 @@ class AdminPermissionRouteMappingTest extends TestCase
         $expected = self::mapping(); ksort($actual); ksort($expected);
         $this->assertSame($expected, $actual);
         $this->assertCount(43, $actual);
-        $this->assertCount(81, Route::getRoutes());
+        $this->assertCount(82, Route::getRoutes());
     }
 
     #[DataProvider('mapping')]

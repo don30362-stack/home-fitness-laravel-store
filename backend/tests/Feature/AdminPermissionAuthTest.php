@@ -175,6 +175,10 @@ class AdminPermissionAuthTest extends TestCase
         $count = 0;
         foreach (Route::getRoutes() as $route) {
             $uri = $route->uri();
+            if ($uri === 'api/admin/dashboard') {
+                $this->assertSame(['api', 'auth:admin', 'admin.active'], $route->gatherMiddleware());
+                continue;
+            }
             if (str_starts_with($uri, 'api/admin/') && ! str_contains($uri, 'permission-test') &&
                 ! in_array($uri, ['api/admin/login', 'api/admin/logout', 'api/admin/me'], true)) {
                 $this->assertContains('auth:admin', $route->gatherMiddleware());

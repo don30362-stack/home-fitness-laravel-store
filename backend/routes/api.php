@@ -10,6 +10,7 @@
 
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\AddressController;
 use App\Http\Controllers\Api\AdminAuthController;
 use App\Http\Controllers\Api\AdminBannerController;
@@ -61,6 +62,7 @@ Route::prefix('admin')->group(function () {
         Route::post('/logout', [AdminAuthController::class, 'logout']);
         Route::get('/me', [AdminAuthController::class, 'me'])->middleware('admin.active');
         Route::middleware('admin.active')->group(function () {
+            Route::get('/dashboard', [DashboardController::class, 'index']);
             Route::middleware('admin.permission:admin_manage')->group(function () {
                 Route::get('/admins', [AdminManagementController::class, 'index']);
                 Route::post('/admins', [AdminManagementController::class, 'store']);
