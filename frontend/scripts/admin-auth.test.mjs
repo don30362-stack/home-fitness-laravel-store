@@ -73,7 +73,7 @@ const originalError = console.error
 console.error = () => {}
 after(async () => { console.error = originalError; await server.close() })
 
-const admin = { id: 1, name: '管理員', email: 'admin@example.test', status: 'active' }
+const admin = { id: 1, name: '管理員', email: 'admin@example.test', status: 'active', permissions: ['product_manage'] }
 const newer = { ...admin, id: 2, email: 'new@example.test' }
 const user = { id: 9, name: '會員', email: 'member@example.test', phone: '0912345678', status: 'active' }
 const payload = { email: admin.email, password: 'test-only' }
@@ -535,6 +535,31 @@ test('Admin login 不 merge cart、不改會員世代或狀態', async () => {
   await auth.login(payload)
   assert.equal(auth.isAdminAuthenticated, true); assert.equal(auth.isAdminInitialized, true)
   assert.equal(memberState.getSessionVersion(), memberGeneration)
+  assertMemberUntouched()
+})
+
+test('Stage23 login saves code permissions; restore replaces the latest identity including empty permissions', async () => {
+  await auth.login(payload)
+  assert.deepEqual(auth.currentAdmin.permissions, ['product_manage'])
+  api.defaults.adapter = config => { calls.push(config); return Promise.resolve(response(config, { data: { ...admin, permissions: ['admin_manage', 'order_manage'] } })) }
+  assert.equal(await auth.restoreAdmin(), 'authenticated')
+  assert.deepEqual(auth.currentAdmin.permissions, ['admin_manage', 'order_manage'])
+  api.defaults.adapter = config => { calls.push(config); return Promise.resolve(response(config, { data: { ...admin, permissions: [] } })) }
+  assert.equal(await auth.restoreAdmin(), 'authenticated')
+  assert.deepEqual(auth.currentAdmin.permissions, [])
+  assert.equal(auth.isAdminAuthenticated, true)
+  assertMemberUntouched()
+})
+
+test('Stage23 foundation permission denied remains ordinary403, retaining identity and member/cart', async () => {
+  const before = state.getAdminGeneration()
+  api.defaults.adapter = config => Promise.reject(failure(config, 403, 'ADMIN_PERMISSION_DENIED'))
+  await assert.rejects(api.get('/admin/permission-test/single'))
+  assert.equal(auth.currentAdmin.id, admin.id)
+  assert.deepEqual(auth.currentAdmin.permissions, ['product_manage'])
+  assert.equal(auth.adminFailureReason, null)
+  assert.equal(state.getAdminGeneration(), before)
+  assert.deepEqual(nav, [])
   assertMemberUntouched()
 })
 test('restore 200 成功、並行 Promise 去重', async () => {

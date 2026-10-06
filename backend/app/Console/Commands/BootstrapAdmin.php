@@ -3,9 +3,13 @@
 namespace App\Console\Commands;
 
 use App\Models\Admin;
+use App\Services\AdminOwnerProvisioningService;
 use Illuminate\Console\Command;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
+use LogicException;
+use RuntimeException;
 
 class BootstrapAdmin extends Command
 {
@@ -13,7 +17,7 @@ class BootstrapAdmin extends Command
 
     protected $description = 'Create a local/testing Admin using interactive credentials';
 
-    public function handle(): int
+    public function handle(AdminOwnerProvisioningService $owners): int
     {
         if (! $this->laravel->environment('local', 'testing')) {
             $this->error('此指令僅允許在 local/testing 環境執行。');
@@ -31,7 +35,7 @@ class BootstrapAdmin extends Command
         $validator = Validator::make($data, [
             'name' => ['required', 'string', 'max:50'],
             'email' => ['required', 'string', 'email', 'max:255'],
-            'password' => ['required', 'string', 'confirmed'],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
         ]);
 
         if ($validator->fails()) {
@@ -49,15 +53,24 @@ class BootstrapAdmin extends Command
         }
 
         try {
-            // Admin 的 hashed cast 負責雜湊；資料庫 unique 也防止並行建立時覆寫。
-            Admin::query()->create([
-                'name' => $data['name'],
-                'email' => $data['email'],
-                'password' => $data['password'],
-                'status' => 'active',
-            ]);
+            DB::transaction(function () use ($data, $owners): void {
+                $admin = new Admin([
+                    'name' => $data['name'],
+                    'email' => $data['email'],
+                    'password' => $data['password'],
+                    'status' => 'active',
+                ]);
+                if (! $admin->saveOrFail() || ! $admin->exists) {
+                    throw new RuntimeException('無法建立管理員資料。');
+                }
+                $owners->grant($admin);
+            });
         } catch (UniqueConstraintViolationException) {
             $this->error('此 Email 已存在，未建立或修改管理員。');
+
+            return self::FAILURE;
+        } catch (LogicException $error) {
+            $this->error($error->getMessage());
 
             return self::FAILURE;
         }

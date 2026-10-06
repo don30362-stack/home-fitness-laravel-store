@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Admin;
 use App\Models\User;
+use Database\Seeders\PermissionSeeder;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -193,17 +194,18 @@ class AdminIdentityTest extends TestCase
     }
 
     #[DataProvider('allowedEnvironments')]
-    public function test_bootstrap_creates_admin_without_imposing_password_complexity(string $environment): void
+    public function test_bootstrap_creates_active_owner_with_minimum_password_policy(string $environment): void
     {
         $this->app->detectEnvironment(fn () => $environment);
-        $this->bootstrapAdmin('開發管理員', 'dev@example.test', 'x', 'x')
+        $this->bootstrapAdmin('開發管理員', 'dev@example.test', 'test-secret', 'test-secret')
             ->expectsOutput('本機開發管理員已建立。')
             ->assertSuccessful();
 
         $admin = Admin::query()->sole();
         $this->assertSame('active', $admin->status);
-        $this->assertTrue(Hash::check('x', $admin->password));
-        $this->assertNotSame('x', $admin->password);
+        $this->assertTrue(Hash::check('test-secret', $admin->password));
+        $this->assertNotSame('test-secret', $admin->password);
+        $this->assertCount(7, $admin->permissions);
     }
 
     public function test_bootstrap_duplicate_email_never_overwrites_existing_admin(): void
@@ -214,6 +216,7 @@ class AdminIdentityTest extends TestCase
         $admin = Admin::query()->sole();
         $admin->update(['status' => 'disabled']);
         $before = $admin->fresh()->getAttributes();
+        $admin->permissions()->detach();
 
         $this->bootstrapAdmin('不同姓名', $admin->email, 'different', 'different')
             ->expectsOutput('此 Email 已存在，未建立或修改管理員。')
@@ -222,18 +225,20 @@ class AdminIdentityTest extends TestCase
         $this->assertSame($before, $admin->fresh()->getAttributes());
         $this->assertTrue(Hash::check('original-secret', $admin->fresh()->password));
         $this->assertDatabaseCount('admins', 1);
+        $this->assertDatabaseCount('admin_permission', 0);
     }
 
     public static function invalidBootstrapInputs(): array
     {
         return [
-            'empty name' => ['', 'dev@example.test', 'x', 'x'],
-            'long name' => [str_repeat('名', 51), 'dev@example.test', 'x', 'x'],
-            'invalid email' => ['姓名', 'invalid', 'x', 'x'],
-            'long email' => ['姓名', str_repeat('a', 245).'@example.test', 'x', 'x'],
+            'empty name' => ['', 'dev@example.test', 'test-secret', 'test-secret'],
+            'long name' => [str_repeat('名', 51), 'dev@example.test', 'test-secret', 'test-secret'],
+            'invalid email' => ['姓名', 'invalid', 'test-secret', 'test-secret'],
+            'long email' => ['姓名', str_repeat('a', 245).'@example.test', 'test-secret', 'test-secret'],
             'blank password' => ['姓名', 'dev@example.test', '   ', '   '],
             'empty password' => ['姓名', 'dev@example.test', '', ''],
-            'mismatched passwords' => ['姓名', 'dev@example.test', 'x', 'y'],
+            'short password' => ['姓名', 'dev@example.test', '1234567', '1234567'],
+            'mismatched passwords' => ['姓名', 'dev@example.test', 'test-secret', 'other-secret'],
         ];
     }
 
@@ -281,6 +286,8 @@ class AdminIdentityTest extends TestCase
 
     private function bootstrapAdmin(string $name, string $email, string $password, string $confirmation): \Illuminate\Testing\PendingCommand
     {
+        $this->seed(PermissionSeeder::class);
+
         return $this->artisan('admin:bootstrap')
             ->expectsQuestion('管理員姓名', $name)
             ->expectsQuestion('管理員 Email', $email)

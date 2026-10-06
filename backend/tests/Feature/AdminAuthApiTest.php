@@ -23,7 +23,7 @@ class AdminAuthApiTest extends TestCase
         $this->withHeader('Origin', 'http://localhost');
     }
 
-    public function test_login_rotates_session_and_me_restores_exact_four_field_contract(): void
+    public function test_login_rotates_session_and_me_restores_exact_identity_contract(): void
     {
         $admin = $this->admin();
         $this->get('/sanctum/csrf-cookie')->assertNoContent();
@@ -284,7 +284,7 @@ class AdminAuthApiTest extends TestCase
 
     private function identity(Admin $admin): array
     {
-        return ['id' => $admin->id, 'name' => $admin->name, 'email' => $admin->email, 'status' => $admin->status];
+        return ['id' => $admin->id, 'name' => $admin->name, 'email' => $admin->email, 'status' => $admin->status, 'permissions' => []];
     }
 
     private function disabledResponse(): array

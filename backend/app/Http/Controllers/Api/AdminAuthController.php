@@ -31,6 +31,7 @@ class AdminAuthController extends Controller
 
         // Laravel 13 SessionGuard::login 已旋轉 ID／CSRF，無須再 regenerate。
         Auth::guard('admin')->login($admin);
+        $admin->load(['permissions' => fn ($query) => $query->orderBy('code')]);
 
         return (new AdminResource($admin))
             ->additional(['message' => '管理員登入成功'])
@@ -39,7 +40,10 @@ class AdminAuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        return (new AdminResource($request->user('admin')))->response();
+        $admin = $request->user('admin');
+        $admin->load(['permissions' => fn ($query) => $query->orderBy('code')]);
+
+        return (new AdminResource($admin))->response();
     }
 
     public function logout(Request $request): JsonResponse

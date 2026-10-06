@@ -6,6 +6,7 @@ use Database\Factories\AdminFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 
 #[Fillable(['name', 'email', 'password', 'status'])]
@@ -14,6 +15,12 @@ class Admin extends Authenticatable
 {
     /** @use HasFactory<AdminFactory> */
     use HasFactory;
+
+    /** @return BelongsToMany<Permission, $this> */
+    public function permissions(): BelongsToMany
+    {
+        return $this->belongsToMany(Permission::class, 'admin_permission');
+    }
 
     /** @return array<string, string> */
     protected function casts(): array
