@@ -6,6 +6,7 @@ import { adminRoutes, adminGuard } from './adminRoutes'
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
 import HomeView from '@/views/HomeView.vue'
 import AboutView from '@/views/AboutView.vue'
+import FAQView from '@/views/FAQView.vue'
 import ProductListView from '@/views/ProductListView.vue'
 import ProductDetailView from '@/views/ProductDetailView.vue'
 import CartView from '@/views/CartView.vue'
@@ -37,6 +38,11 @@ const router = createRouter({
           path: 'about',
           name: 'about',
           component: AboutView,
+        },
+        {
+          path: 'faq',
+          name: 'faq',
+          component: FAQView,
         },
         {
           path: 'products',

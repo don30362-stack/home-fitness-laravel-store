@@ -13,6 +13,7 @@
     "test:admin": "node --test scripts/admin-auth.test.mjs",
     "test:orders": "node --test scripts/order-list.test.mjs",
     "test:home": "node --test scripts/home-content.test.mjs",
+    "test:content": "node --test scripts/content-pages.test.mjs",
     "lint": "run-s \"lint:*\"",
     "lint:oxlint": "oxlint . --fix",
     "lint:eslint": "eslint . --fix --cache",
