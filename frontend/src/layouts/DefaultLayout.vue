@@ -6,7 +6,7 @@ import AppFooter from '@/components/layout/AppFooter.vue';
 </script>
 
 <template>
-    <div class="d-flex flex-column min-vh-100">
+    <div class="storefront-shell d-flex flex-column min-vh-100">
         <AppHeader />
 
         <main>

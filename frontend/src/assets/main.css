@@ -1,35 +1,16 @@
 @import './base.css';
-
-#app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  font-weight: normal;
+#app { width: 100%; min-width: 0; font-weight: normal; }
+.storefront-shell {
+ --hf-black: #181918; --hf-charcoal: #2E2E2D; --hf-gold: #BD935A;
+ --hf-ivory: #F5F2EC; --hf-stone: #D8D3CA; --hf-white: #FFFFFF;
+ --hf-section-space: clamp(3rem, 7.5vw, 6.5rem);
+ background: var(--hf-white); color: var(--hf-charcoal);
+ font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
 }
-
-a,
-.green {
-  text-decoration: none;
-  color: hsla(160, 100%, 37%, 1);
-  transition: 0.4s;
-  padding: 3px;
-}
-
-@media (hover: hover) {
-  a:hover {
-    background-color: hsla(160, 100%, 37%, 0.2);
-  }
-}
-
-@media (min-width: 1024px) {
-  body {
-    display: flex;
-    place-items: center;
-  }
-
-  #app {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 0 2rem;
-  }
-}
+.storefront-shell a { text-decoration: none; }
+.hf-button { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: .8rem 1.5rem; border: 1px solid var(--hf-charcoal); background: var(--hf-charcoal); color: var(--hf-white); font-weight: 600; max-width: 100%; white-space: normal; transition: background 200ms, color 200ms; }
+.hf-button:hover { background: var(--hf-black); color: var(--hf-white); }
+.hf-button--light { background: var(--hf-ivory); color: var(--hf-charcoal); border-color: var(--hf-ivory); }
+.hf-button--light:hover { background: var(--hf-white); color: var(--hf-black); }
+.storefront-shell :focus-visible { outline: 3px solid var(--hf-gold); outline-offset: 4px; }
+@media (prefers-reduced-motion: reduce) { .hf-button { transition: none; } }
