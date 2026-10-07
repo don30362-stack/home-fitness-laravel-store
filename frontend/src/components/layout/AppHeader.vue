@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth';
+import logoUrl from '@/assets/images/brand/home-fit-logo.png'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -31,7 +32,7 @@ const handleLogout = async () => {
         <nav class="navbar navbar-expand-lg">
             <div class="container">
                 <RouterLink class="navbar-brand fw-bold" :to="{ name: 'home' }">
-                    Home Fitness
+                    <img :src="logoUrl" alt="Home Fitness" class="brand-logo" width="1032" height="713">
                 </RouterLink>
 
                 <div class="navbar-nav ms-auto">
@@ -68,3 +69,10 @@ const handleLogout = async () => {
         </nav>
     </header>
 </template>
+
+<style scoped>
+.brand-logo {
+    height: 48px;
+    width: auto;
+}
+</style>
