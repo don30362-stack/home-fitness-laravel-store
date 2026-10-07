@@ -22,6 +22,7 @@ globalThis.localStorage = {
 const adminViews = {
   AdminLoginView: '/src/views/admin/AdminLoginView.vue', AdminLayout: '/src/layouts/AdminLayout.vue',
   AdminForbiddenView: '/src/views/admin/AdminForbiddenView.vue',
+  AdminDashboardView: '/src/views/admin/AdminDashboardView.vue',
   AdminManagementView: '/src/views/admin/AdminManagementView.vue',
   AdminSidebar: '/src/components/admin/AdminSidebar.vue', AdminHeader: '/src/components/admin/AdminHeader.vue',
   AdminPlaceholderView: '/src/views/admin/AdminPlaceholderView.vue', AdminNotFoundView: '/src/views/admin/AdminNotFoundView.vue',
@@ -69,6 +70,7 @@ const productService = await server.ssrLoadModule('/src/services/adminProductSer
 const inventoryService = await server.ssrLoadModule('/src/services/adminInventoryService.ts')
 const categoryService = await server.ssrLoadModule('/src/services/adminCategoryService.ts')
 const orderService = await server.ssrLoadModule('/src/services/adminOrderService.ts')
+const dashboardService = await server.ssrLoadModule('/src/services/dashboardService.ts')
 const userService = await server.ssrLoadModule('/src/services/adminUserService.ts')
 const bannerService = await server.ssrLoadModule('/src/services/adminHomeContentService.ts')
 const managementService = await server.ssrLoadModule('/src/services/adminManagementService.ts')
@@ -135,6 +137,7 @@ beforeEach(() => {
   memberApi.defaults.adapter = async (config) => response(config, { data: user })
   api.defaults.adapter = async (config) => {
     calls.push(config)
+    if (config.url === '/admin/dashboard') return response(config, { data: { products: null, members: null, orders: null } })
     if (config.url === '/admin/admins' || config.url === '/admin/permissions') return response(config, { data: [] })
     if (config.url === '/categories') return response(config, { data: categoryOptions })
     if (config.url === '/admin/categories') return response(config, { data: adminCategoryTree })
@@ -601,7 +604,7 @@ for (const status of [undefined, 403, 419, 500, 503]) {
     assert.equal(auth.currentAdmin.id, admin.id); assert.equal(auth.isAdminInitialized, false)
     assert.ok(auth.restoreError); assert.equal(auth.adminFailureReason, null)
     assert.equal(count, 1); await settle(); assert.deepEqual(nav, []); assertMemberUntouched()
-    api.defaults.adapter = async (config) => response(config, { data: admin })
+    api.defaults.adapter = async (config) => response(config, { data: config.url === '/admin/dashboard' ? { products: null, members: null, orders: null } : admin })
     await auth.restoreAdmin(); assert.equal(auth.restoreError, null)
   })
 }
@@ -801,11 +804,11 @@ test('Admin-only 八模組保持階段對照，products／inventory／categories
     await view.router.push('/admin/' + item.path); await settle()
     const main = find(view.root, (el) => el.type === 'main')
     assert.ok(text(main).includes(item.title))
-    if (['products', 'inventory', 'categories', 'orders', 'users', 'home-content', 'admins'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
+    if (['dashboard', 'products', 'inventory', 'categories', 'orders', 'users', 'home-content', 'admins'].includes(item.path)) assert.ok(!text(main).includes('尚未實作'))
     else { assert.ok(text(main).includes('尚未實作')); assert.ok(text(main).includes('Stage ' + item.stage)) }
   }
   assert.deepEqual(routes.adminModules.map((item) => item.stage), [24, 19, 20, 19, 21, 21, 22, 23])
-  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/admins', '/admin/banners', '/admin/categories', '/admin/inventory', '/admin/orders', '/admin/permissions', '/admin/products', '/admin/recommended-products', '/admin/users', '/categories', '/categories']); assert.equal(member.currentUser, null)
+  assert.deepEqual(calls.map(c => c.url).sort(), ['/admin/admins', '/admin/banners', '/admin/categories', '/admin/dashboard', '/admin/inventory', '/admin/orders', '/admin/permissions', '/admin/products', '/admin/recommended-products', '/admin/users', '/categories', '/categories']); assert.equal(member.currentUser, null)
   const frontLink = find(view.root, (el) => el.type === 'a' && el.props.href === '/')
   assert.ok(frontLink); assert.equal(frontLink.props.onClick, undefined)
   const menu = find(view.root, (el) => el.type === 'button' && text(el) === '選單')
@@ -849,13 +852,13 @@ for (const status of [undefined, 419, 500]) {
 test('已初始化有效 Admin 開 login 導 dashboard', async () => {
   auth.isAdminInitialized = true
   const view = await mountRoute('/admin/login')
-  assert.equal(view.router.currentRoute.value.name, 'admin-dashboard'); assert.equal(calls.length, 0)
+  assert.equal(view.router.currentRoute.value.name, 'admin-dashboard'); assert.deepEqual(calls.map(c => c.url), ['/admin/dashboard'])
   view.app.unmount()
 })
 for (const outcome of ['authenticated', 'guest', 'disabled', 'temporary']) {
   test(`login guard 未初始化 restore ${outcome} 的合理結果`, async () => {
     auth.currentAdmin = null
-    api.defaults.adapter = (config) => outcome === 'authenticated' ? Promise.resolve(response(config, { data: admin }))
+    api.defaults.adapter = (config) => config.url === '/admin/dashboard' ? Promise.resolve(response(config, { data: { products: null, members: null, orders: null } })) : outcome === 'authenticated' ? Promise.resolve(response(config, { data: admin }))
       : Promise.reject(failure(config, outcome === 'guest' ? 401 : outcome === 'disabled' ? 403 : 500,
         outcome === 'disabled' ? 'ADMIN_ACCOUNT_DISABLED' : undefined))
     const view = await mountRoute('/admin/login')
@@ -863,7 +866,7 @@ for (const outcome of ['authenticated', 'guest', 'disabled', 'temporary']) {
     if (outcome === 'disabled') assert.ok(text(view.root).includes('後端停用原因'))
     if (outcome === 'temporary') {
       assert.ok(text(view.root).includes('無法恢復管理員登入狀態'))
-      api.defaults.adapter = async (config) => response(config, { data: admin })
+      api.defaults.adapter = async (config) => response(config, { data: config.url === '/admin/dashboard' ? { products: null, members: null, orders: null } : admin })
       await find(view.root, (el) => el.type === 'button' && text(el) === '重試').props.onClick(); await settle()
       assert.equal(view.router.currentRoute.value.name, 'admin-dashboard')
     }
@@ -900,7 +903,7 @@ for (const status of [200, 401, 500, undefined]) {
       assert.equal(view.router.currentRoute.value.name, 'admin-dashboard'); assert.ok(text(view.root).includes('登出失敗'))
       assert.equal(auth.currentAdmin.id, admin.id)
     }
-    assert.equal(calls.length, 1); assertMemberUntouched(); view.app.unmount()
+    assert.deepEqual(calls.map(c => c.url), ['/admin/dashboard', '/admin/logout']); assertMemberUntouched(); view.app.unmount()
   })
 }
 test('未知 Admin URL 使用 Admin 專用 NotFound，保留後台框架', async () => {
@@ -1505,7 +1508,7 @@ const categoriesView = async () => {
   return mountRoute('/admin/categories')
 }
 const assertCategoryCalls = () => {
-  assert.ok(calls.every(c => c.url === '/admin/categories' && c.method === 'get'))
+  assert.ok(calls.every(c => ['/admin/categories', '/admin/dashboard'].includes(c.url) && c.method === 'get'))
   assertMemberUntouched()
 }
 
@@ -1589,7 +1592,7 @@ test('分類快速重試：晚到舊成功／失敗均不覆蓋最新管理樹',
 
 test('離開分類route後晚到GET不覆蓋其他模組，返回時重新讀取', async () => {
   let finish
-  api.defaults.adapter = config => { calls.push(config); return new Promise(resolve => {
+  api.defaults.adapter = config => { calls.push(config); if (config.url === '/admin/dashboard') return Promise.resolve(response(config, { data: { products: null, members: null, orders: null } })); return new Promise(resolve => {
     finish = () => resolve(response(config, { data: adminCategoryTree }))
   }) }
   const view = await categoriesView()
@@ -1599,7 +1602,7 @@ test('離開分類route後晚到GET不覆蓋其他模組，返回時重新讀取
   assert.ok(text(main).includes('Dashboard')); assert.ok(!text(main).includes('管理根分類'))
   api.defaults.adapter = async config => { calls.push(config); return response(config, { data: adminCategoryTree }) }
   await view.router.push('/admin/categories'); await settle()
-  assert.ok(text(view.root).includes('管理根分類')); assert.equal(calls.length, 2)
+  assert.ok(text(view.root).includes('管理根分類')); assert.deepEqual(calls.map(c => c.url), ['/admin/categories', '/admin/dashboard', '/admin/categories'])
   assertCategoryCalls(); view.app.unmount()
 })
 
@@ -1617,6 +1620,7 @@ const categoryMutationRow = (payload, id = 20) => ({ id, parent_id: null, name: 
   sort_order: 0, children_count: 0, product_count: 0, children: [], created_at: null, updated_at: null, ...payload })
 const categoryMutationAdapter = handler => async config => {
   calls.push(config)
+  if (config.url === '/admin/dashboard') return response(config, { data: { products: null, members: null, orders: null } })
   if (config.method === 'get') return response(config, { data: adminCategoryTree })
   return handler(config)
 }
@@ -1625,7 +1629,7 @@ const submitCategory = async view => {
   assert.ok(form); form.props.onSubmit({ preventDefault() {} }); await settle()
 }
 const assertCategoryMutationBoundary = () => {
-  assert.ok(calls.every(c => /^\/admin\/categories(?:\/\d+)?$/.test(c.url) && ['get', 'post', 'patch'].includes(c.method)))
+  assert.ok(calls.every(c => c.url === '/admin/dashboard' && c.method === 'get' || /^\/admin\/categories(?:\/\d+)?$/.test(c.url) && ['get', 'post', 'patch'].includes(c.method)))
   assertMemberUntouched()
 }
 
@@ -1861,13 +1865,13 @@ for(const [status,code] of [[422],[403],[419],[undefined],[500],[401],[403,'ADMI
  })
 }
 test('Category status route leave keeps stale protection and never refreshes another module',async()=>{
- let finish;api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:adminCategoryTree}));return new Promise(resolve=>{finish=()=>resolve(response(c,{data:categoryMutationRow(),message:'late status success'}))})}
+ let finish;api.defaults.adapter=c=>{calls.push(c); if (c.url === '/admin/dashboard') return Promise.resolve(response(c, { data: { products: null, members: null, orders: null } }));if(c.method==='get')return Promise.resolve(response(c,{data:adminCategoryTree}));return new Promise(resolve=>{finish=()=>resolve(response(c,{data:categoryMutationRow(),message:'late status success'}))})}
  const view=await categoriesView();await click(view,'啟用主分類');await click(view,'確認變更狀態');await view.router.push('/admin/dashboard');await settle();finish();await settle()
- assert.equal(view.router.currentRoute.value.path,'/admin/dashboard');assert.ok(!text(view.root).includes('late status success'));assert.equal(calls.filter(c=>c.method==='get').length,1);assertMemberUntouched();view.app.unmount()
+ assert.equal(view.router.currentRoute.value.path,'/admin/dashboard');assert.ok(!text(view.root).includes('late status success'));assert.equal(calls.filter(c=>c.method==='get' && c.url === '/admin/categories').length,1);assertMemberUntouched();view.app.unmount()
 })
 
 const assertCategoryDeleteBoundary = () => {
-  assert.ok(calls.every(c => c.method === 'get' ? c.url === '/admin/categories' : c.method === 'delete' && /^\/admin\/categories\/\d+$/.test(c.url)))
+  assert.ok(calls.every(c => c.method === 'get' ? ['/admin/categories', '/admin/dashboard'].includes(c.url) : c.method === 'delete' && /^\/admin\/categories\/\d+$/.test(c.url)))
   assertMemberUntouched()
 }
 for (const [role, label, name, id] of [['root','刪除主分類','管理根分類',1], ['child','刪除子分類','啟用子分類',2]]) {
@@ -1918,9 +1922,9 @@ for(const [status,code] of [[403],[419],[undefined],[500],[401],[403,'ADMIN_ACCO
 }
 for(const outcome of ['success','failure']) {
  test(`Category DELETE route leave late ${outcome}: no navigation/message/GET contamination`,async()=>{
-  let finish;api.defaults.adapter=c=>{calls.push(c);if(c.method==='get')return Promise.resolve(response(c,{data:adminCategoryTree}));return new Promise((resolve,reject)=>{finish=()=>outcome==='success'?resolve(response(c,{message:'late delete success'})):reject(failure(c,500))})}
+  let finish;api.defaults.adapter=c=>{calls.push(c); if (c.url === '/admin/dashboard') return Promise.resolve(response(c, { data: { products: null, members: null, orders: null } }));if(c.method==='get')return Promise.resolve(response(c,{data:adminCategoryTree}));return new Promise((resolve,reject)=>{finish=()=>outcome==='success'?resolve(response(c,{message:'late delete success'})):reject(failure(c,500))})}
   const view=await categoriesView();await click(view,'刪除主分類');await click(view,'確認刪除分類');await view.router.push('/admin/dashboard');await settle();finish();await settle()
-  assert.equal(view.router.currentRoute.value.path,'/admin/dashboard');assert.ok(!text(view.root).includes('late delete success'));assert.ok(!text(view.root).includes('後端停用原因'));assert.equal(calls.filter(c=>c.method==='get').length,1);assertCategoryDeleteBoundary();view.app.unmount()
+  assert.equal(view.router.currentRoute.value.path,'/admin/dashboard');assert.ok(!text(view.root).includes('late delete success'));assert.ok(!text(view.root).includes('後端停用原因'));assert.equal(calls.filter(c=>c.method==='get' && c.url === '/admin/categories').length,1);assertCategoryDeleteBoundary();view.app.unmount()
  })
 }
 test('Category DELETE service reuses message-only type and adminApi without body',async()=>{
@@ -1935,7 +1939,7 @@ const ordersView = async (url = '/admin/orders') => {
   return mountRoute(url)
 }
 const assertReadOnlyOrderCalls = () => {
-  assert.ok(calls.every(c => c.method === 'get' && /^\/admin\/orders(?:\/\d+)?$/.test(c.url)))
+  assert.ok(calls.every(c => c.method === 'get' && (c.url === '/admin/dashboard' || /^\/admin\/orders(?:\/\d+)?$/.test(c.url))))
   assertMemberUntouched()
 }
 test('Admin Order service only GETs list/detail through independent adminApi, passes query/envelopes', async () => {
@@ -2021,13 +2025,13 @@ test('Admin Order detail GET snapshot/null logistics, link back keeps filters', 
 })
 test('Admin Order detail 404/loading/logistics update and fresh GET on re-entry', async () => {
   let finish
-  api.defaults.adapter = c => { calls.push(c); return new Promise((resolve, reject) => { finish = () => reject(failure(c, 404)) }) }
+  api.defaults.adapter = c => { calls.push(c); if (c.url === '/admin/dashboard') return Promise.resolve(response(c, { data: { products: null, members: null, orders: null } })); return new Promise((resolve, reject) => { finish = () => reject(failure(c, 404)) }) }
   const view = await ordersView('/admin/orders/1'); assert.ok(text(view.root).includes('訂單詳細載入中'))
   finish(); await settle(); assert.ok(text(view.root).includes('訂單不存在'))
-  api.defaults.adapter = async c => { calls.push(c); return response(c, { data: { ...adminOrderDetail, logistics_company: '物流測試', tracking_number: 'TRACK-123' } }) }
+  api.defaults.adapter = async c => { calls.push(c); if (c.url === '/admin/dashboard') return Promise.resolve(response(c, { data: { products: null, members: null, orders: null } })); return response(c, { data: { ...adminOrderDetail, logistics_company: '物流測試', tracking_number: 'TRACK-123' } }) }
   await click(view, '重試'); assert.ok(text(view.root).includes('物流測試')); assert.ok(text(view.root).includes('TRACK-123'))
   await view.router.push('/admin/dashboard'); await settle(); await view.router.push('/admin/orders/1'); await settle()
-  assert.equal(calls.length, 3); assertReadOnlyOrderCalls(); view.app.unmount()
+  assert.equal(calls.filter(c => c.url !== '/admin/dashboard').length, 3); assertReadOnlyOrderCalls(); view.app.unmount()
 })
 for (const outcome of ['success', 'error']) {
   for (const condition of ['search', 'page']) {
@@ -2057,19 +2061,19 @@ for (const outcome of ['success', 'error']) {
   for (const phase of ['list', 'detail']) {
     test(`Admin Order ${phase} route leave ignores late ${outcome} without navigation/error contamination`, async () => {
       let finish
-      api.defaults.adapter = c => { calls.push(c); return new Promise((resolve, reject) => { finish = () => outcome === 'success'
+      api.defaults.adapter = c => { calls.push(c); if (c.url === '/admin/dashboard') return Promise.resolve(response(c, { data: { products: null, members: null, orders: null } })); return new Promise((resolve, reject) => { finish = () => outcome === 'success'
         ? resolve(response(c, phase === 'list' ? adminOrderPage() : { data: adminOrderDetail })) : reject(failure(c, 500)) }) }
       const view = await ordersView(phase === 'list' ? '/admin/orders' : '/admin/orders/1')
       await view.router.push('/admin/dashboard'); await settle(); finish(); await settle()
       assert.equal(view.router.currentRoute.value.name, 'admin-dashboard'); assert.ok(!text(view.root).includes('HF-READ-001'))
-      assert.ok(!text(view.root).includes('後端停用原因')); assert.equal(calls.length, 1); assertReadOnlyOrderCalls(); view.app.unmount()
+      assert.ok(!text(view.root).includes('後端停用原因')); assert.equal(calls.filter(c => c.url !== '/admin/dashboard').length, 1); assertReadOnlyOrderCalls(); view.app.unmount()
     })
   }
 }
 
 // Stage 21 Step 2: SFC memory rendering + real services, not browser or row-lock acceptance.
 const lifecycleBoundary = () => {
-  assert.ok(calls.every(c => c.method === 'get' ? /^\/admin\/orders\/\d+$/.test(c.url)
+  assert.ok(calls.every(c => c.method === 'get' ? (c.url === '/admin/dashboard' || /^\/admin\/orders\/\d+$/.test(c.url))
     : c.method === 'patch' && /^\/admin\/orders\/\d+\/(status|payment-status|shipment)$/.test(c.url)))
   assertMemberUntouched()
 }
@@ -2167,7 +2171,7 @@ test('Order shipment correction keeps shipped and sends both trimmed fields, pay
 
 test('Order PATCH succeeds but GET fails: retain success, block stale mutation, manual retry only GET',async()=>{
  let reads=0
- api.defaults.adapter=c=>{calls.push(c);if(c.method==='patch')return Promise.resolve(response(c,{data:adminOrderDetail,message:'已成功變更'}))
+ api.defaults.adapter=c=>{calls.push(c); if (c.url === '/admin/dashboard') return Promise.resolve(response(c, { data: { products: null, members: null, orders: null } }));if(c.method==='patch')return Promise.resolve(response(c,{data:adminOrderDetail,message:'已成功變更'}))
   reads++;if(reads===2)return Promise.reject(failure(c,503));return Promise.resolve(response(c,{data:{...adminOrderDetail,order_status:reads===1?'pending':'processing'}}))}
  const view=await ordersView('/admin/orders/1');await click(view,'設為處理中');await settle()
  assert.ok(text(view.root).includes('已成功變更'));assert.ok(text(view.root).includes('最新資料重新載入失敗'))
@@ -2183,6 +2187,7 @@ for(const phase of ['mutation','refresh']) {
    test(`Order late ${phase} ${outcome} after ${destination}: no message/error/state/navigation contamination`,async()=>{
     let finish,oldReads=0
     api.defaults.adapter=c=>{calls.push(c)
+ if (c.url === '/admin/dashboard') return Promise.resolve(response(c, { data: { products: null, members: null, orders: null } }));
      const deferred=()=>new Promise((resolve,reject)=>{finish=()=>outcome==='success'?resolve(response(c,{data:{...adminOrderDetail,order_no:'LATE-OLD'},message:'LATE-MESSAGE'})):reject(failure(c,500))})
      if(c.method==='patch')return phase==='mutation'?deferred():Promise.resolve(response(c,{data:adminOrderDetail,message:'LATE-MESSAGE'}))
      if(c.url.endsWith('/2'))return Promise.resolve(response(c,{data:{...adminOrderDetail,id:2,order_no:'SECOND-ORDER'}}))
@@ -2213,7 +2218,7 @@ test('Old mutation finally cannot unlock a newer order mutation',async()=>{
 
 // Stage 21 Step 3: shared cancel entry, confirmation and page-local lifecycle.
 const cancelBoundary = () => {
- assert.ok(calls.every(c=>c.method==='get'?/^\/admin\/orders\/\d+$/.test(c.url)
+ assert.ok(calls.every(c=>c.method==='get'?(c.url === '/admin/dashboard' || /^\/admin\/orders\/\d+$/.test(c.url))
   :c.method==='post'?/^\/admin\/orders\/\d+\/cancel$/.test(c.url)&&c.data===undefined
   :c.method==='patch'&&/^\/admin\/orders\/\d+\/(status|payment-status|shipment)$/.test(c.url)))
  assertMemberUntouched()
@@ -2272,7 +2277,7 @@ for(const [status,code] of [[422],[403],[419],[undefined],[500],[401],[403,'ADMI
 
 test('Admin cancel success + refresh failure retains success; stale operations blocked/manual retry GET only',async()=>{
  let reads=0
- api.defaults.adapter=c=>{calls.push(c);if(c.method==='post')return Promise.resolve(response(c,{data:adminOrderDetail,message:'訂單已取消。'}))
+ api.defaults.adapter=c=>{calls.push(c); if (c.url === '/admin/dashboard') return Promise.resolve(response(c, { data: { products: null, members: null, orders: null } }));if(c.method==='post')return Promise.resolve(response(c,{data:adminOrderDetail,message:'訂單已取消。'}))
   if(++reads===2)return Promise.reject(failure(c,500));return Promise.resolve(response(c,{data:{...adminOrderDetail,order_status:reads===1?'pending':'cancelled'}}))}
  const view=await ordersView('/admin/orders/1');await confirmCancel(view);await settle()
  assert.ok(text(view.root).includes('訂單已取消。'));assert.ok(text(view.root).includes('最新資料重新載入失敗'))
@@ -2286,6 +2291,7 @@ for(const phase of ['cancel','refresh'])for(const outcome of ['success','error']
  test(`Admin cancel late ${phase} ${outcome} after ${destination}: context isolation`,async()=>{
   let finish,reads=0
   api.defaults.adapter=c=>{calls.push(c)
+   if(c.url==='/admin/dashboard')return Promise.resolve(response(c,{data:{products:null,members:null,orders:null}}))
    const defer=()=>new Promise((resolve,reject)=>{finish=()=>outcome==='success'?resolve(response(c,{data:{...adminOrderDetail,order_no:'LATE-CANCEL'},message:'LATE-CANCEL-MESSAGE'})):reject(failure(c,500))})
    if(c.method==='post')return phase==='cancel'?defer():Promise.resolve(response(c,{data:adminOrderDetail,message:'LATE-CANCEL-MESSAGE'}))
    if(c.url.endsWith('/2'))return Promise.resolve(response(c,{data:{...adminOrderDetail,id:2,order_no:'SECOND-ORDER'}}))
@@ -2311,7 +2317,7 @@ test('Old cancel finally cannot unlock newer order mutation or restore its confi
 // Stage 21 Step 4: SFC/memory-router tests; not real-browser acceptance.
 const usersView = async (url = '/admin/users') => { auth.currentAdmin = { ...admin, permissions: ['member_manage', 'order_manage'] }; auth.isAdminInitialized = true; return mountRoute(url) }
 const userBoundary = () => {
-  assert.ok(calls.every(c => c.method === 'get' && /^\/admin\/users(?:\/\d+)?$/.test(c.url) || c.method === 'patch' && /^\/admin\/users\/\d+\/status$/.test(c.url)))
+  assert.ok(calls.every(c => c.method === 'get' && (c.url === '/admin/dashboard' || /^\/admin\/users(?:\/\d+)?$/.test(c.url)) || c.method === 'patch' && /^\/admin\/users\/\d+\/status$/.test(c.url)))
   for (const c of mutations()) assert.ok(['active','disabled'].includes(JSON.parse(c.data).status))
   assertMemberUntouched()
 }
@@ -2469,7 +2475,7 @@ for(const [status,code] of [[422],[403],[419],[undefined],[500],[401],[403,'ADMI
 
 test('User mutation success + GET failure keeps success/detail, manual retry only GET',async()=>{
   let reads=0
-  api.defaults.adapter=c=>{calls.push(c);if(c.method==='patch')return Promise.resolve(response(c,{data:{...adminUser,status:'disabled'},message:'確定已成功'}))
+  api.defaults.adapter=c=>{calls.push(c); if (c.url === '/admin/dashboard') return Promise.resolve(response(c, { data: { products: null, members: null, orders: null } }));if(c.method==='patch')return Promise.resolve(response(c,{data:{...adminUser,status:'disabled'},message:'確定已成功'}))
     if(++reads===2)return Promise.reject(failure(c,500));return Promise.resolve(response(c,{data:userDetail(reads===1?'active':'disabled')}))}
   const view=await usersView('/admin/users/9?order_page=2');await confirmUserStatus(view);await settle()
   assert.ok(text(view.root).includes('確定已成功'));assert.ok(text(view.root).includes('最新資料重新載入失敗'));assert.ok(button(view,'停用會員'));assert.equal(button(view,'停用會員').props.disabled,true)
@@ -2481,7 +2487,7 @@ for(const phase of ['mutation','refresh'])for(const destination of ['/admin/user
   test(`User stale ${phase}/${destination}/${outcome} has no late refresh/message/navigation`,async()=>{
     let finish,reads=0
     const defer=c=>new Promise((resolve,reject)=>{finish=()=>outcome==='error'?reject(failure(c,500)):resolve(response(c,phase==='mutation'?{data:adminUser,message:'LATE-USER-MESSAGE'}:{data:{...userDetail(),user:{...adminUser,name:'LATE-USER-DATA'}}}))})
-    api.defaults.adapter=c=>{calls.push(c);if(c.method==='patch')return phase==='mutation'?defer(c):Promise.resolve(response(c,{data:adminUser,message:'LATE-USER-MESSAGE'}))
+    api.defaults.adapter=c=>{calls.push(c); if (c.url === '/admin/dashboard') return Promise.resolve(response(c, { data: { products: null, members: null, orders: null } }));if(c.method==='patch')return phase==='mutation'?defer(c):Promise.resolve(response(c,{data:adminUser,message:'LATE-USER-MESSAGE'}))
       if(c.url.endsWith('/10')||c.params?.order_page==='2')return Promise.resolve(response(c,{data:{...userDetail(),user:{...adminUser,name:'NEW-USER-CONTEXT'}}}))
       return ++reads===1?Promise.resolve(response(c,{data:userDetail()})):defer(c)}
     const view=await usersView('/admin/users/9');await confirmUserStatus(view);await settle();await view.router.push(destination);await settle();finish();await settle();await settle()
@@ -2534,7 +2540,7 @@ for (const permissions of [[], ...routes.adminModules.filter(m => m.permission).
     for (const module of routes.adminModules) {
       assert.equal(Boolean(find(view.root, el => el.type === 'a' && el.props.href === '/admin/'+module.path)), !module.permission || permissions.includes(module.permission), module.path)
     }
-    assert.equal(calls.length, 0); assert.ok(find(view.root, el => el.type === 'a' && el.props.href === '/')); view.app.unmount()
+    assert.deepEqual(calls.map(c => c.url), ['/admin/dashboard']); assert.ok(find(view.root, el => el.type === 'a' && el.props.href === '/')); view.app.unmount()
   })
 }
 test('Home-only selector reads existing Product list while Products routes and links remain unavailable', async () => {
@@ -2605,7 +2611,7 @@ for(const status of [403,419,422,undefined,500]) {
 for(const phase of ['denial','refresh']) {
  test(`Route leave before late ${phase}: no Forbidden/message pollution on new module`,async()=>{
   auth.isAdminInitialized=true;const view=await mountRoute('/admin/products');let finish
-  api.defaults.adapter=c=>{calls.push(c);if(c.url==='/admin/me')return phase==='refresh'?new Promise(resolve=>{finish=()=>resolve(response(c,{data:{...admin,permissions:[]}}))}):Promise.resolve(response(c,{data:{...admin,permissions:[]}}));return phase==='denial'?new Promise((resolve,reject)=>{finish=()=>reject(failure(c,403,'ADMIN_PERMISSION_DENIED'))}):Promise.reject(failure(c,403,'ADMIN_PERMISSION_DENIED'))}
+  api.defaults.adapter=c=>{calls.push(c); if (c.url === '/admin/dashboard') return Promise.resolve(response(c, { data: { products: null, members: null, orders: null } }));if(c.url==='/admin/me')return phase==='refresh'?new Promise(resolve=>{finish=()=>resolve(response(c,{data:{...admin,permissions:[]}}))}):Promise.resolve(response(c,{data:{...admin,permissions:[]}}));return phase==='denial'?new Promise((resolve,reject)=>{finish=()=>reject(failure(c,403,'ADMIN_PERMISSION_DENIED'))}):Promise.reject(failure(c,403,'ADMIN_PERMISSION_DENIED'))}
   const pending=assert.rejects(api.patch('/admin/products/1',{}));await settle();await view.router.push('/admin/dashboard');await settle();finish();await pending;await settle()
   assert.equal(view.router.currentRoute.value.name,'admin-dashboard');assert.ok(!text(view.root).includes('沒有此功能權限'));assertMemberUntouched();view.app.unmount()
  })
@@ -2641,6 +2647,7 @@ const managedRow = (id=2) => ({id,name:'帳號'+id,email:`managed${id}@example.t
 const managementView = async () => { auth.isAdminInitialized=true;auth.currentAdmin={...admin,permissions:['admin_manage']};return mountRoute('/admin/admins') }
 const managementAdapter = (handler, reads) => async c => {
  calls.push(c)
+ if(c.url==='/admin/dashboard')return response(c,{data:{products:null,members:null,orders:null}})
  if(c.method!=='get') return handler ? handler(c) : response(c,{data:managedRow(),message:'權威成功'})
  if(reads) {const result=await reads(c);if(result)return result}
  if(c.url==='/admin/admins')return response(c,{data:[managedRow(1),managedRow(2)]})
@@ -2841,4 +2848,164 @@ for (const action of ['revoke', 'disable']) test(`Management self ${action} succ
  }
  assert.ok(!calls.some(c => c.url === '/admin/logout'))
  assertMemberUntouched(); view.app.unmount()
+})
+// Stage 24: SFC memory renderer / Axios adapter; not browser acceptance.
+const dashboardStats = (mask = 7, zero = false) => ({
+  products: mask & 1 ? { total: zero ? 0 : 123 } : null,
+  members: mask & 2 ? { total: zero ? 0 : 456 } : null,
+  orders: mask & 4 ? { total: zero ? 0 : 789, pending: zero ? 0 : 12, awaiting_shipment: zero ? 0 : 34,
+    completed_order_amount: zero ? '0.00' : '9007199254740993.10', recent_orders: zero ? [] : [
+      { id: 81, order_no: 'DASH-RECENT-81', created_at: '2026-10-06T16:00:00Z', total_amount: '1234.50', order_status: 'processing', payment_status: 'paid' },
+      { id: 82, order_no: 'DASH-RECENT-82', created_at: '2026-10-06T16:00:00Z', total_amount: '0.30', order_status: 'cancelled', payment_status: 'unpaid' },
+      { id: 83, order_no: 'DASH-RECENT-83', created_at: '2026-10-06T16:00:00Z', total_amount: '1.00', order_status: 'legacy_status', payment_status: '__proto__' },
+    ] } : null,
+})
+const dashboardView = async (permissions = []) => {
+  auth.currentAdmin = { ...admin, permissions }; auth.isAdminInitialized = true
+  return mountRoute('/admin/dashboard')
+}
+const dashboardBoundary = () => {
+  assert.ok(calls.every(c => c.method === 'get' && c.url === '/admin/dashboard'))
+  assertMemberUntouched()
+}
+const dashboardCard = (view, key) => find(view.root, el => el.props['data-stat'] === key)
+test('Dashboard service GET only, unwrap data and preserve decimal string', async () => {
+  const stats = dashboardStats(); api.defaults.adapter = c => { calls.push(c); return Promise.resolve(response(c, { data: stats })) }
+  assert.deepEqual(await dashboardService.getAdminDashboard(), stats)
+  assert.deepEqual(calls.map(c => [c.method, c.url]), [['get', '/admin/dashboard']]); dashboardBoundary()
+})
+for (let mask = 0; mask < 8; mask++) {
+  test(`Dashboard backend authority combination ${mask}, stale client permissions ignored`, async () => {
+    api.defaults.adapter = c => { calls.push(c); return Promise.resolve(response(c, { data: dashboardStats(mask) })) }
+    const view = await dashboardView(mask === 7 ? [] : ['product_manage', 'member_manage', 'order_manage'])
+    assert.equal(view.router.currentRoute.value.name, 'admin-dashboard'); assert.equal(view.router.currentRoute.value.meta.requiresAdmin, true)
+    assert.equal(Object.hasOwn(view.router.currentRoute.value.meta, 'adminPermission'), false)
+    for (const [key, bit] of [['products', 1], ['members', 2], ['orders', 4], ['pending', 4], ['awaiting-shipment', 4], ['completed-amount', 4]]) assert.equal(Boolean(dashboardCard(view, key)), Boolean(mask & bit), key)
+    assert.equal(text(view.root).includes('目前沒有可查看的統計區塊'), mask === 0)
+    assert.equal(Boolean(find(view.root, el => el.type === 'a' && el.props.href === '/admin/orders/81')), Boolean(mask & 4))
+    assert.ok(!text(view.root).includes('尚未實作')); assert.equal(calls.length, 1); dashboardBoundary(); view.app.unmount()
+  })
+}
+test('Dashboard zero and empty recent are visible, not all-null welcome', async () => {
+  api.defaults.adapter = c => { calls.push(c); return Promise.resolve(response(c, { data: dashboardStats(7, true) })) }
+  const view = await dashboardView(); for (const key of ['products', 'members', 'orders', 'pending', 'awaiting-shipment']) assert.ok(text(dashboardCard(view, key)).includes('0'))
+  assert.ok(text(dashboardCard(view, 'completed-amount')).includes('NT$ 0.00')); assert.ok(text(view.root).includes('目前沒有近期訂單'))
+  assert.ok(!text(view.root).includes('目前沒有可查看的統計區塊')); dashboardBoundary(); view.app.unmount()
+})
+test('Dashboard exact amount/date/status/recent links, no private fields or extra list calls', async () => {
+  api.defaults.adapter = c => { calls.push(c); return Promise.resolve(response(c, { data: dashboardStats() })) }
+  const view = await dashboardView(['order_manage']); const content = text(view.root)
+  for (const value of ['9,007,199,254,740,993.10', '1,234.50', '0.30', '包含運費', '處理中', '已取消', '已付款', '未付款', 'legacy_status', '__proto__', '2026']) assert.ok(content.includes(value), value)
+  for (const value of ['營收', '銷售額', user.email, 'snapshot@example.test', '歷史地址']) assert.ok(!content.includes(value), value)
+  const links = []; const collect = el => { if (el.type === 'a' && /^\/admin\/orders\/\d+$/.test(el.props.href ?? '')) links.push(el); el.children.forEach(collect) }; collect(view.root)
+  assert.deepEqual(links.map(el => el.props.href), ['/admin/orders/81', '/admin/orders/82', '/admin/orders/83']); dashboardBoundary()
+  api.defaults.adapter = c => { calls.push(c); return Promise.resolve(response(c, { data: adminOrderDetail })) }
+  await links[0].props.onClick({ button: 0, preventDefault() {} }); await settle()
+  assert.equal(view.router.currentRoute.value.name, 'admin-order-detail'); assert.equal(view.router.currentRoute.value.params.id, '81'); view.app.unmount()
+})
+test('Dashboard initial loading hides data/welcome, disabled refresh handler blocks duplicates', async () => {
+  let finish; api.defaults.adapter = c => { calls.push(c); return new Promise(resolve => { finish = () => resolve(response(c, { data: dashboardStats(1) })) }) }
+  const view = await dashboardView(); assert.ok(text(view.root).includes('正在載入 Dashboard'))
+  assert.equal(dashboardCard(view, 'products'), undefined); assert.ok(!text(view.root).includes('目前沒有可查看'))
+  assert.equal(button(view, '重新整理').props.disabled, true); await click(view, '重新整理'); assert.equal(calls.length, 1)
+  finish(); await settle(); assert.equal(button(view, '重新整理').props.disabled, false); assert.ok(text(dashboardCard(view, 'products')).includes('123')); dashboardBoundary(); view.app.unmount()
+})
+test('Dashboard initial error, manual retry GET only, no auto retry', async () => {
+  let bad = true; api.defaults.adapter = c => { calls.push(c); return bad ? Promise.reject(failure(c, 503)) : Promise.resolve(response(c, { data: dashboardStats(0) })) }
+  const view = await dashboardView(); assert.ok(find(view.root, el => el.props.role === 'alert')); assert.equal(dashboardCard(view, 'products'), undefined)
+  assert.ok(!text(view.root).includes('目前沒有可查看')); assert.equal(calls.length, 1)
+  bad = false; await click(view, '重試'); assert.equal(calls.length, 2); assert.ok(text(view.root).includes('目前沒有可查看'))
+  assert.equal(auth.currentAdmin.id, admin.id); dashboardBoundary(); view.app.unmount()
+})
+test('Dashboard refresh pending preserves data/blocks duplicates, success replaces sections', async () => {
+  let finish, get = 0; api.defaults.adapter = c => { calls.push(c); return ++get === 1 ? Promise.resolve(response(c, { data: dashboardStats() })) : new Promise(resolve => { finish = () => resolve(response(c, { data: dashboardStats(2, true) })) }) }
+  const view = await dashboardView(); await click(view, '重新整理'); await click(view, '重新整理')
+  assert.equal(calls.length, 2); assert.equal(button(view, '重新整理').props.disabled, true); assert.ok(dashboardCard(view, 'orders'))
+  finish(); await settle(); assert.equal(dashboardCard(view, 'orders'), undefined); assert.equal(dashboardCard(view, 'products'), undefined)
+  assert.ok(text(dashboardCard(view, 'members')).includes('0')); assert.equal(button(view, '重新整理').props.disabled, false); dashboardBoundary(); view.app.unmount()
+})
+test('Dashboard refresh failure retains last success/stale warning, next retry replaces data', async () => {
+  let get = 0; api.defaults.adapter = c => { calls.push(c); if (++get === 2) return Promise.reject(failure(c, 503)); return Promise.resolve(response(c, { data: dashboardStats(get === 1 ? 7 : 0) })) }
+  const view = await dashboardView(); await click(view, '重新整理'); assert.ok(text(view.root).includes('上次成功取得的資料'))
+  assert.ok(text(dashboardCard(view, 'products')).includes('123')); assert.ok(text(view.root).includes('9,007,199,254,740,993.10')); assert.equal(calls.length, 2)
+  await click(view, '重試'); assert.equal(calls.length, 3); assert.equal(dashboardCard(view, 'products'), undefined); assert.ok(text(view.root).includes('目前沒有可查看'))
+  assert.ok(!text(view.root).includes('可能已過時')); dashboardBoundary(); view.app.unmount()
+})
+for (const [status, code] of [[401], [403, 'ADMIN_ACCOUNT_DISABLED'], [403], [419], [422], [undefined], [500]]) {
+  test(`Dashboard GET ${status ?? 'network'}/${code ?? ''}: coordinator/isolation, no retry`, async () => {
+    api.defaults.adapter = c => { calls.push(c); return Promise.reject(failure(c, status, code)) }
+    const view = await dashboardView(); await settle(); assert.equal(calls.length, 1)
+    if (status === 401 || code) { assert.equal(auth.currentAdmin, null); assert.equal(view.router.currentRoute.value.name, 'admin-login') }
+    else { assert.equal(auth.currentAdmin.id, admin.id); assert.equal(view.router.currentRoute.value.name, 'admin-dashboard'); assert.ok(button(view, '重試')) }
+    dashboardBoundary(); view.app.unmount()
+  })
+}
+for (const outcome of ['success', 'error']) {
+  test(`Dashboard old request A ${outcome} cannot replace latest B after route reentry`, async () => {
+    let old, get = 0; api.defaults.adapter = c => { calls.push(c); if (++get === 1) return new Promise((resolve, reject) => { old = () => outcome === 'error' ? reject(failure(c, 503)) : resolve(response(c, { data: dashboardStats(1) })) }); return Promise.resolve(response(c, { data: dashboardStats(2) })) }
+    const view = await dashboardView(); await view.router.push('/admin/does-not-exist'); await settle(); await view.router.push('/admin/dashboard'); await settle()
+    assert.ok(text(dashboardCard(view, 'members')).includes('456')); old(); await settle()
+    assert.equal(dashboardCard(view, 'products'), undefined); assert.ok(text(dashboardCard(view, 'members')).includes('456')); assert.equal(find(view.root, el => el.props.role === 'alert'), undefined)
+    assert.equal(calls.length, 2); dashboardBoundary(); view.app.unmount()
+  })
+  test(`Dashboard unmount late ${outcome} cannot change URL/message or refetch`, async () => {
+    let finish; api.defaults.adapter = c => { calls.push(c); return new Promise((resolve, reject) => { finish = () => outcome === 'error' ? reject(failure(c, 503)) : resolve(response(c, { data: dashboardStats() })) }) }
+    const view = await dashboardView(); await view.router.push('/admin/does-not-exist'); await settle(); finish(); await settle()
+    assert.equal(view.router.currentRoute.value.name, 'admin-not-found'); assert.equal(find(view.root, el => el.props.id === 'admin-dashboard-title'), undefined)
+    assert.ok(!text(view.root).includes('後端停用原因')); assert.ok(!text(view.root).includes('DASH-RECENT')); assert.equal(calls.length, 1); dashboardBoundary(); view.app.unmount()
+  })
+}
+test('Dashboard reload remount performs fresh GET, no cached stats', async () => {
+  api.defaults.adapter = c => { calls.push(c); return Promise.resolve(response(c, { data: dashboardStats(calls.length === 1 ? 1 : 2) })) }
+  const first = await dashboardView(); first.app.unmount(); const second = await dashboardView()
+  assert.equal(calls.length, 2); assert.equal(dashboardCard(second, 'products'), undefined); assert.ok(dashboardCard(second, 'members')); dashboardBoundary(); second.app.unmount()
+})
+for (const outcome of ['success', 'error']) {
+  test(`Dashboard overlapping lifecycle requests: latest B wins over late A ${outcome}`, async () => {
+    const pending = []
+    api.defaults.adapter = c => { calls.push(c); return new Promise((resolve, reject) => pending.push({ c, resolve, reject })) }
+    const view = await dashboardView()
+    const componentFor = vnode => {
+      if (!vnode || typeof vnode !== 'object') return undefined
+      const instance = vnode.component
+      if (instance?.subTree.props?.['aria-labelledby'] === 'admin-dashboard-title') return instance
+      return componentFor(instance?.subTree) || (Array.isArray(vnode.children) ? vnode.children.map(componentFor).find(Boolean) : undefined)
+    }
+    const component = componentFor(view.app._instance.subTree); assert.ok(component)
+    // Re-enter the existing lifecycle load in the memory host, without a production test seam.
+    component.m[0](); await settle(); assert.equal(pending.length, 2)
+    pending[1].resolve(response(pending[1].c, { data: dashboardStats(2) })); await settle()
+    assert.equal(button(view, '重新整理').props.disabled, false)
+    if (outcome === 'error') pending[0].reject(failure(pending[0].c, 503))
+    else pending[0].resolve(response(pending[0].c, { data: dashboardStats(1) }))
+    await settle(); assert.equal(dashboardCard(view, 'products'), undefined); assert.ok(text(dashboardCard(view, 'members')).includes('456'))
+    assert.equal(find(view.root, el => el.props.role === 'alert'), undefined); dashboardBoundary(); view.app.unmount()
+  })
+  test(`Dashboard pending manual refresh late ${outcome} is ignored after leaving`, async () => {
+    let finish, get = 0
+    api.defaults.adapter = c => { calls.push(c); return ++get === 1 ? Promise.resolve(response(c, { data: dashboardStats(1) })) : new Promise((resolve, reject) => { finish = () => outcome === 'error' ? reject(failure(c, 503)) : resolve(response(c, { data: dashboardStats(2) })) }) }
+    const view = await dashboardView(); await click(view, '重新整理'); await view.router.push('/admin/does-not-exist'); await settle(); finish(); await settle()
+    assert.equal(view.router.currentRoute.value.name, 'admin-not-found'); assert.ok(!text(view.root).includes('後端停用原因')); assert.equal(dashboardCard(view, 'members'), undefined)
+    assert.equal(calls.length, 2); dashboardBoundary(); view.app.unmount()
+  })
+}
+test('Dashboard unexpected permission denial uses existing me coordinator once, no logout or GET auto retry', async () => {
+  api.defaults.adapter = c => { calls.push(c); return c.url === '/admin/me' ? Promise.resolve(response(c, { data: { ...admin, permissions: [] } })) : Promise.reject(failure(c, 403, 'ADMIN_PERMISSION_DENIED')) }
+  const view = await dashboardView(['order_manage']); await settle()
+  assert.deepEqual(calls.map(c => c.url), ['/admin/dashboard', '/admin/me']); assert.equal(auth.currentAdmin.id, admin.id)
+  assert.equal(view.router.currentRoute.value.name, 'admin-dashboard'); assert.ok(button(view, '重試')); assertMemberUntouched(); view.app.unmount()
+})
+test('Dashboard renders five backend recent rows in supplied order and all existing status labels', async () => {
+  const stats = dashboardStats(4)
+  stats.orders.recent_orders = ['pending', 'processing', 'shipped', 'completed', 'cancelled'].map((status, index) => ({
+    id: 90 - index, order_no: 'FIVE-ORDER-' + index, created_at: '2026-10-07T00:00:00Z', total_amount: '0.00', order_status: status, payment_status: 'unpaid',
+  }))
+  api.defaults.adapter = c => { calls.push(c); return Promise.resolve(response(c, { data: stats })) }
+  const view = await dashboardView(); const rows = []
+  const collect = el => { if (el.type === 'tr' && text(el).includes('FIVE-ORDER-')) rows.push(el); el.children.forEach(collect) }; collect(view.root)
+  assert.equal(rows.length, 5)
+  for (const [index, label] of ['待處理', '處理中', '已出貨', '已完成', '已取消'].entries()) {
+    assert.ok(text(rows[index]).includes('FIVE-ORDER-' + index)); assert.ok(text(rows[index]).includes(label))
+  }
+  assert.equal(calls.length, 1); dashboardBoundary(); view.app.unmount()
 })
