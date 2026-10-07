@@ -49,6 +49,9 @@ const handleLogout = async () => {
                     <RouterLink class="nav-link" :to="{ name: 'about' }">
                         品牌介紹
                     </RouterLink>
+                    <RouterLink class="nav-link" :to="{ name: 'faq' }">
+                        常見問題
+                    </RouterLink>
                     <RouterLink class="nav-link" :to="{ name: 'cart' }">
                         購物車
                     </RouterLink>

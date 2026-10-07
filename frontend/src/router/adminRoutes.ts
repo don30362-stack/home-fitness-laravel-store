@@ -17,6 +17,7 @@ import AdminProductFormView from '@/views/admin/AdminProductFormView.vue'
 import { setAdminNavigationCallbacks } from '@/services/adminSessionNavigation'
 
 import { adminModules } from './adminModules'
+import { ADMIN_PAGE_METADATA } from './pageMetadata'
 export { adminModules } from './adminModules'
 import AdminManagementView from '@/views/admin/AdminManagementView.vue'
 import AdminForbiddenView from '@/views/admin/AdminForbiddenView.vue'
@@ -38,9 +39,9 @@ export const safeAdminRedirect = (value: unknown): string => {
 }
 
 export const adminRoutes: RouteRecordRaw[] = [
-  { path: '/admin/login', name: 'admin-login', component: AdminLoginView },
+  { path: '/admin/login', name: 'admin-login', component: AdminLoginView, meta: { ...ADMIN_PAGE_METADATA } },
   {
-    path: '/admin', component: AdminLayout, meta: { requiresAdmin: true },
+    path: '/admin', component: AdminLayout, meta: { requiresAdmin: true, ...ADMIN_PAGE_METADATA },
     children: [
       { path: '', redirect: '/admin/dashboard' },
       ...adminModules.map((module) => ({

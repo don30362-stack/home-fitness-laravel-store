@@ -76,7 +76,7 @@ const mount = async (component = Home) => {
     { path: '/products', name: 'products', component: { render: () => h('div', '商品頁') } },
     { path: '/products/:id', name: 'product-detail', component: { render: () => h('div', '商品詳細') } },
     { path: '/away', component: { render: () => h('div', '其他頁') } },
-    ...['about', 'cart', 'member-profile', 'login', 'register'].map((name) => ({ path: '/nav-' + name, name, component: { render: () => h('div', name) } })),
+    ...['about', 'faq', 'cart', 'member-profile', 'login', 'register'].map((name) => ({ path: '/nav-' + name, name, component: { render: () => h('div', name) } })),
   ] })
   await router.push('/'); await router.isReady()
   const root = node('root')

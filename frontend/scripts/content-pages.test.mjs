@@ -5,16 +5,30 @@ import { createServer } from 'vite'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createRenderer, nextTick, h } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory, RouterView } from 'vue-router'
 
 const files = {
   'virtual:about': '/src/views/AboutView.vue',
   'virtual:faq': '/src/views/FAQView.vue',
+  'virtual:header': '/src/components/layout/AppHeader.vue',
+  'virtual:footer': '/src/components/layout/AppFooter.vue',
 }
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', plugins: [{
   name: 'content-pages-test-sfc', enforce: 'pre',
-  resolveId(id) { if (id in files) return '\0' + id + '.ts' },
+  resolveId(id) {
+    if (id in files || id === 'virtual:router') return '\0' + id + '.ts'
+    if (id.endsWith('.vue')) return '\0virtual:blank.ts'
+  },
   async load(id) {
+    if (id === '\0virtual:blank.ts') return 'export default {}'
+    if (id === '\0virtual:router.ts') {
+      const source = (await readFile(new URL('../src/router/index.ts', import.meta.url), 'utf8'))
+        .replaceAll('createWebHistory', 'createMemoryHistory')
+        .replaceAll("'./adminRoutes'", "'/src/router/adminRoutes.ts'")
+        .replaceAll("'./pageMetadata'", "'/src/router/pageMetadata.ts'")
+      return source
+    }
     const file = files[id.replace(/^\0/, '').replace(/\.ts$/, '')]
     if (!file) return
     const source = await readFile(new URL('..' + file, import.meta.url), 'utf8')
@@ -25,11 +39,19 @@ const server = await createServer({ server: { middlewareMode: true }, appType: '
 }] })
 const { default: About } = await server.ssrLoadModule('virtual:about')
 const { default: FAQ } = await server.ssrLoadModule('virtual:faq')
+const { default: Header } = await server.ssrLoadModule('virtual:header')
+const { default: Footer } = await server.ssrLoadModule('virtual:footer')
+const metadata = await server.ssrLoadModule('/src/router/pageMetadata.ts')
+const originalStorage = globalThis.localStorage
+globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} }
+const { useAuthStore } = await server.ssrLoadModule('/src/stores/auth.ts')
+const { useAdminAuthStore } = await server.ssrLoadModule('/src/stores/adminAuth.ts')
+const { default: actualRouter } = await server.ssrLoadModule('virtual:router')
 const { faqGroups } = await server.ssrLoadModule('/src/content/faq.ts')
 const aboutSource = await readFile(new URL('../src/views/AboutView.vue', import.meta.url), 'utf8')
 const faqSource = await readFile(new URL('../src/views/FAQView.vue', import.meta.url), 'utf8')
 const routerSource = await readFile(new URL('../src/router/index.ts', import.meta.url), 'utf8')
-after(async () => { await server.close() })
+after(async () => { if (originalStorage === undefined) delete globalThis.localStorage; else globalThis.localStorage = originalStorage; await server.close() })
 
 // Vue memory renderer verifies rendered contracts; native browser interaction is checked separately.
 const node = (type, text = '') => ({ type, text, props: {}, children: [], parent: null })
@@ -184,5 +206,129 @@ test('Actual public router adds only the FAQ page and retains existing named rou
   assert.match(routerSource, /component: FAQView/)
   assert.match(routerSource, /\.\.\.adminRoutes/)
   assert.match(routerSource, /router\.beforeEach\(adminGuard\)/)
-  assert.ok(!routerSource.includes('afterEach')) // SEO belongs to Step2
+  assert.match(routerSource, /router\.afterEach/); assert.match(routerSource, /applyPageMetadata\(to.meta\)/)
+})
+
+
+const documentStub = (count = 1) => {
+  const tags = []
+  const make = () => ({ name: 'description', content: '', remove() { tags.splice(tags.indexOf(this), 1) } })
+  for (let i = 0; i < count; i++) tags.push(make())
+  return { title: '', tags, querySelectorAll: () => [...tags], createElement: make, head: { appendChild: tag => tags.push(tag) } }
+}
+const mountLayoutPart = async (component, member = false) => {
+  const pinia = createPinia(); setActivePinia(pinia)
+  const auth = useAuthStore(pinia)
+  if (member) auth.currentUser = { id: 1, name: '測試會員', email: 'private@example.test', status: 'active' }
+  const router = createRouter({ history: createMemoryHistory(), routes: ['home', 'products', 'about', 'faq', 'cart', 'login', 'register', 'member', 'member-profile'].map(name => ({ path: name === 'home' ? '/' : '/' + name, name, component: {} })) })
+  await router.push('/about')
+  const root = node('root'); const app = renderer.createApp(component)
+  app.use(pinia); app.use(router); app.mount(root)
+  return { app, root, router }
+}
+
+test('Header shares one ordered FAQ navigation contract and retains guest/auth/cart entries', async () => {
+  for (const member of [false, true]) {
+    const v = await mountLayoutPart(Header, member)
+    const links = all(v.root, e => e.type === 'a')
+    assert.deepEqual(links.slice(1, 6).map(e => e.props.href), ['/', '/products', '/about', '/faq', '/cart'])
+    assert.equal(text(links[4]).trim(), '常見問題')
+    assert.equal(all(v.root, e => e.props.id === 'storefront-navigation').length, 1)
+    assert.ok(text(v.root).includes(member ? '測試會員' : '登入'))
+    assert.ok(text(v.root).includes(member ? '登出' : '註冊'))
+    const toggle = find(v.root, e => e.type === 'button' && e.props['aria-controls'])
+    toggle.props.onClick(); await settle(); assert.equal(toggle.props['aria-expanded'], true)
+    find(v.root, e => e.props.id === 'storefront-navigation').props.onClick()
+    await settle(); assert.equal(toggle.props['aria-expanded'], false)
+    toggle.props.onClick(); await settle(); await v.router.push('/faq'); await settle()
+    assert.equal(toggle.props['aria-expanded'], false)
+    v.app.unmount()
+  }
+})
+
+test('Footer renders the three confirmed sections and actual RouterLinks without fabricated contact data', async () => {
+  const v = await mountLayoutPart(Footer)
+  assert.ok(text(v.root).includes('Home Fit把訓練，帶回自己的生活。'))
+  assert.deepEqual(all(v.root, e => e.type === 'h2').map(text), ['探索', '購物資訊'])
+  assert.deepEqual(all(v.root, e => e.type === 'a').map(e => [text(e), e.props.href]), [
+    ['商品', '/products'], ['品牌介紹', '/about'], ['常見問題與購物須知', '/faq'], ['會員中心', '/member'], ['購物車', '/cart']])
+  assert.ok(text(v.root).includes('© Home Fitness'))
+  assert.doesNotMatch(text(v.root), /Email|電話|地址|門市|統編|客服|Facebook|Instagram|LINE|newsletter|@/)
+  const link = find(v.root, e => e.props.href === '/faq')
+  link.props.onClick({button:0,preventDefault(){}}); await settle(); await settle()
+  assert.equal(v.router.currentRoute.value.name, 'faq')
+  v.app.unmount()
+})
+
+test('Metadata helper replaces prior values, defaults invalid values, creates missing tag and removes duplicates', () => {
+  const doc = documentStub(2)
+  metadata.applyPageMetadata({title:'頁A',description:'說明A'},doc)
+  assert.equal(doc.title,'頁A'); assert.equal(doc.tags[0].content,'說明A'); assert.equal(doc.tags.length,1)
+  metadata.applyPageMetadata({title:' 頁B ',description:' 說明B '},doc)
+  assert.equal(doc.title,'頁B'); assert.equal(doc.tags[0].content,'說明B')
+  for (const invalid of [undefined,null,' ',123,[],{}]) {
+    metadata.applyPageMetadata({title:invalid,description:invalid},doc)
+    assert.equal(doc.title,metadata.DEFAULT_PAGE_METADATA.title)
+    assert.equal(doc.tags[0].content,metadata.DEFAULT_PAGE_METADATA.description)
+    assert.equal(doc.tags.length,1)
+  }
+  const missing=documentStub(0); metadata.applyPageMetadata({},missing)
+  assert.equal(missing.tags.length,1); assert.equal(missing.tags[0].name,'description')
+})
+
+const expectedTitles = {
+  home:'Home Fit｜居家訓練器材', products:'商品｜Home Fit', 'product-detail':'商品詳細｜Home Fit',
+  about:'品牌介紹｜Home Fit', faq:'常見問題與購物須知｜Home Fit', cart:'購物車｜Home Fit',
+  checkout:'結帳｜Home Fit', login:'會員登入｜Home Fit', register:'會員註冊｜Home Fit', member:'會員中心｜Home Fit',
+  'member-profile':'會員資料｜Home Fit', 'member-addresses':'地址簿｜Home Fit', 'member-orders':'我的訂單｜Home Fit',
+  'member-order-detail':'訂單詳細｜Home Fit', 'not-found':'找不到頁面｜Home Fit',
+}
+for (const [name,title] of Object.entries(expectedTitles)) test(`Actual route metadata: ${name}`,()=>{
+  const params = ['product-detail','member-order-detail'].includes(name)? {id:'PRIVATE-ORDER-123'} : {}
+  const route=actualRouter.resolve({name,params})
+  assert.equal(route.meta.title,title); assert.ok(route.meta.description.trim())
+  assert.doesNotMatch(JSON.stringify(route.meta),/PRIVATE-ORDER-123|private@example.test|測試會員|0912345678/)
+  if(name==='checkout'||name.startsWith('member')) assert.equal(route.meta.requiresAuth,true)
+})
+
+test('Every Admin route inherits safe generic metadata without losing permissions',()=>{
+  for(const path of ['/admin','/admin/login','/admin/dashboard','/admin/products/new','/admin/products/15/edit','/admin/orders/15','/admin/users/15','/admin/admins','/admin/forbidden','/admin/unknown']){
+    const route=actualRouter.resolve(path)
+    assert.equal(route.meta.title,metadata.ADMIN_PAGE_METADATA.title)
+    assert.equal(route.meta.description,metadata.ADMIN_PAGE_METADATA.description)
+    if(path!=='/admin/login') assert.equal(route.meta.requiresAdmin,true)
+    if(path==='/admin/orders/15') assert.equal(route.meta.adminPermission,'order_manage')
+  }
+})
+
+test('Actual afterEach follows final guard/redirect target and public/Admin/member transitions; aborted navigation preserves current metadata',async()=>{
+  const pinia=createPinia(); setActivePinia(pinia)
+  const auth=useAuthStore(pinia); const admin=useAdminAuthStore(pinia); admin.isAdminInitialized=true
+  const original=globalThis.document; const doc=documentStub(); globalThis.document=doc
+  try{
+    await actualRouter.push('/faq'); assert.equal(doc.title,expectedTitles.faq)
+    await actualRouter.push('/member/orders'); assert.equal(actualRouter.currentRoute.value.name,'login'); assert.equal(doc.title,expectedTitles.login)
+    await actualRouter.push('/checkout'); assert.equal(doc.title,expectedTitles.login)
+    auth.currentUser={id:5,name:'PRIVATE NAME',email:'private@example.test',phone:'0912345678',status:'active'}
+    await actualRouter.push('/member'); assert.equal(actualRouter.currentRoute.value.name,'member-profile'); assert.equal(doc.title,expectedTitles['member-profile'])
+    await actualRouter.push('/member/orders/123'); assert.equal(doc.title,expectedTitles['member-order-detail'])
+    await actualRouter.push('/admin/products'); assert.equal(actualRouter.currentRoute.value.name,'admin-login'); assert.equal(doc.title,metadata.ADMIN_PAGE_METADATA.title)
+    admin.currentAdmin={id:5,name:'PRIVATE ADMIN',email:'admin@example.test',status:'active',permissions:[]}
+    await actualRouter.push('/admin/products'); assert.equal(actualRouter.currentRoute.value.name,'admin-forbidden'); assert.equal(doc.title,metadata.ADMIN_PAGE_METADATA.title)
+    await actualRouter.push('/about'); assert.equal(doc.title,expectedTitles.about)
+    const remove=actualRouter.beforeEach(to=>to.name==='faq'?false:undefined)
+    await actualRouter.push('/faq'); assert.equal(doc.title,expectedTitles.about); remove()
+    await actualRouter.push('/unknown'); assert.equal(doc.title,expectedTitles['not-found'])
+    assert.equal(doc.tags.length,1)
+    assert.doesNotMatch(doc.title+doc.tags[0].content,/PRIVATE|@|0912345678|123/)
+  } finally{ if(original===undefined) delete globalThis.document; else globalThis.document=original }
+})
+
+test('index.html has zh-Hant and the same formal safe defaults',async()=>{
+  const source=await readFile(new URL('../index.html',import.meta.url),'utf8')
+  assert.match(source,/<html lang="zh-Hant">/)
+  assert.ok(source.includes(`<title>${metadata.DEFAULT_PAGE_METADATA.title}</title>`))
+  assert.ok(source.includes(`content="${metadata.DEFAULT_PAGE_METADATA.description}"`))
+  assert.equal((source.match(/name="description"/g)||[]).length,1)
+  assert.doesNotMatch(source,/Vite App|og:|twitter:|canonical|application\/ld\+json/)
 })
