@@ -163,13 +163,13 @@ onBeforeUnmount(() => {
         </caption>
         <thead>
           <tr>
-            <th>商品編號</th>
-            <th>名稱</th>
-            <th>分類</th>
-            <th>價格</th>
-            <th>商品狀態</th>
-            <th>庫存模式</th>
-            <th>詳細</th>
+            <th scope="col">商品編號</th>
+            <th scope="col">名稱</th>
+            <th scope="col">分類</th>
+            <th scope="col">價格</th>
+            <th scope="col">商品狀態</th>
+            <th scope="col">庫存模式</th>
+            <th scope="col">詳細</th>
           </tr>
         </thead>
         <tbody>

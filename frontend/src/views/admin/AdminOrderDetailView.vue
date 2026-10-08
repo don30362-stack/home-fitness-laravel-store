@@ -156,7 +156,7 @@ onBeforeUnmount(() => { ++contextVersion; ++requestId })
       <div class="table-responsive">
         <table class="table">
           <caption class="visually-hidden">訂單商品快照</caption>
-          <thead><tr><th>商品編號</th><th>商品名稱</th><th>購買規格</th><th>單價</th><th>數量</th><th>小計</th></tr></thead>
+          <thead><tr><th scope="col">商品編號</th><th scope="col">商品名稱</th><th scope="col">購買規格</th><th scope="col">單價</th><th scope="col">數量</th><th scope="col">小計</th></tr></thead>
           <tbody><tr v-for="item in order.items" :key="item.id"><td>{{ item.product_code }}</td><td>{{ item.product_name }}</td><td>{{ item.variant ?? '無規格' }}</td><td>NT$ {{ item.unit_price }}</td><td>{{ item.quantity }}</td><td>NT$ {{ item.subtotal }}</td></tr></tbody>
         </table>
       </div>

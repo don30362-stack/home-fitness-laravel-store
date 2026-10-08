@@ -114,7 +114,7 @@ onBeforeUnmount(() => { ++requestId })
     <div v-else class="table-responsive">
       <table class="table align-middle">
         <caption class="visually-hidden">後台訂單列表</caption>
-        <thead><tr><th>訂單編號</th><th>建立時間（台北）</th><th>目前會員</th><th>總金額</th><th>付款方式</th><th>付款狀態</th><th>訂單狀態</th><th>詳細</th></tr></thead>
+        <thead><tr><th scope="col">訂單編號</th><th scope="col">建立時間（台北）</th><th scope="col">目前會員</th><th scope="col">總金額</th><th scope="col">付款方式</th><th scope="col">付款狀態</th><th scope="col">訂單狀態</th><th scope="col">詳細</th></tr></thead>
         <tbody>
           <tr v-for="order in orders" :key="order.id">
             <td>{{ order.order_no }}</td><td>{{ formatDate(order.created_at) }}</td>

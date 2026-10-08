@@ -73,7 +73,7 @@ onBeforeUnmount(() => { ++requestId })
     <p v-else-if="users.length === 0">沒有符合條件的會員。</p>
     <div v-else class="table-responsive"><table class="table align-middle">
       <caption class="visually-hidden">後台會員列表</caption>
-      <thead><tr><th>姓名</th><th>Email</th><th>電話</th><th>狀態</th><th>建立時間（台北）</th><th>詳細</th></tr></thead>
+      <thead><tr><th scope="col">姓名</th><th scope="col">Email</th><th scope="col">電話</th><th scope="col">狀態</th><th scope="col">建立時間（台北）</th><th scope="col">詳細</th></tr></thead>
       <tbody><tr v-for="user in users" :key="user.id"><td>{{ user.name }}</td><td>{{ user.email }}</td><td>{{ user.phone ?? '—' }}</td><td>{{ labels[user.status] ?? user.status }}</td><td>{{ formatDate(user.created_at) }}</td><td><RouterLink :to="{ name: 'admin-user-detail', params: { id: user.id }, query: route.query }">查看詳細</RouterLink></td></tr></tbody>
     </table></div>
     <AppPagination v-if="!isLoading && !errorMessage" :current-page="pagination.current_page" :last-page="pagination.last_page" label="後台會員分頁" @change-page="changePage" />

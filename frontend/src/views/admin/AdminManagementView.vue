@@ -162,7 +162,7 @@ onBeforeUnmount(() => { disposed = true; context++ })
     <p v-if="listLoading" role="status">載入管理員列表中…</p>
     <p v-if="listError" class="alert alert-danger">{{ listError }} <button :disabled="pending || listLoading" @click="retry('list')">重試列表</button></p>
     <p v-if="!listLoading && !listError && !admins.length">目前沒有管理員。</p>
-    <div class="table-responsive mb-3"><table v-if="admins.length" class="table"><thead><tr><th>名稱</th><th>Email</th><th>狀態</th><th>詳細</th></tr></thead><tbody><tr v-for="item in admins" :key="item.id"><td>{{ item.name }}</td><td class="text-break">{{ item.email }}</td><td>{{ item.status === 'active' ? '啟用' : '停用' }}</td><td><button class="btn btn-outline-primary" :disabled="pending || stale" @click="select(item.id)">查看 {{ item.name }}</button></td></tr></tbody></table></div>
+    <div class="table-responsive mb-3"><table v-if="admins.length" class="table"><thead><tr><th scope="col">名稱</th><th scope="col">Email</th><th scope="col">狀態</th><th scope="col">詳細</th></tr></thead><tbody><tr v-for="item in admins" :key="item.id"><td>{{ item.name }}</td><td class="text-break">{{ item.email }}</td><td>{{ item.status === 'active' ? '啟用' : '停用' }}</td><td><button class="btn btn-outline-primary" :disabled="pending || stale" @click="select(item.id)">查看 {{ item.name }}</button></td></tr></tbody></table></div>
     <form v-if="creating" id="managed-admin-create" class="card card-body mb-3" @submit.prevent="create">
       <h2 class="h4">新增管理員</h2><fieldset :disabled="pending">
         <label for="managed-name">名稱</label><input id="managed-name" v-model="draft.name" required maxlength="50" class="form-control mb-2">
