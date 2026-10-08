@@ -55,7 +55,8 @@ Route::get('/cities/{cityId}/districts', [CityController::class, 'districts'])
 Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:member-register');
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:member-login');
 
-Route::prefix('admin')->group(function () {
+Route::prefix('admin')->middleware('admin.demo-access')->group(function () {
+    Route::post('/demo', [\App\Http\Controllers\Api\AdminDemoController::class, 'store'])->middleware('throttle:admin-demo');
     Route::post('/login', [AdminAuthController::class, 'login'])->middleware('throttle:admin-login');
 
     Route::middleware('auth:admin')->group(function () {

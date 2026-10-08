@@ -11,6 +11,8 @@ class DashboardController extends Controller
 {
     public function index(Request $request, DashboardService $service): DashboardResource
     {
-        return new DashboardResource($service->summary($request->user('admin')));
+        $admin = $request->user('admin');
+        return new DashboardResource(app(\App\Services\AdminDemoService::class)->isDemo($admin)
+            ? $service->demoSummary() : $service->summary($admin));
     }
 }

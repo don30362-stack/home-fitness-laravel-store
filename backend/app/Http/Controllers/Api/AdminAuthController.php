@@ -18,7 +18,8 @@ class AdminAuthController extends Controller
         $validated = $request->validated();
         $admin = Admin::query()->where('email', $validated['email'])->first();
 
-        if (! $admin || ! Hash::check($validated['password'], $admin->password)) {
+        if (! $admin || app(\App\Services\AdminDemoService::class)->isDemo($admin)
+            || ! Hash::check($validated['password'], $admin->password)) {
             return response()->json(['message' => '管理員電子郵件或密碼錯誤'], 401);
         }
 
@@ -49,6 +50,7 @@ class AdminAuthController extends Controller
     public function logout(Request $request): JsonResponse
     {
         Auth::guard('admin')->logout();
+        $request->session()->forget('admin_demo_id');
         $request->session()->migrate(true);
 
         return response()->json(['message' => '管理員登出成功']);

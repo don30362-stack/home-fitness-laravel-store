@@ -11,6 +11,12 @@ class EnsureAdminHasPermission
     public function handle(Request $request, Closure $next, string ...$codes): Response
     {
         $admin = $request->user('admin');
+        $demo = app(\App\Services\AdminDemoService::class);
+        if ($demo->isDemo($admin)) {
+            return $demo->allowsRead($request) ? $next($request) : response()->json([
+                'code' => 'DEMO_READ_ONLY', 'message' => '唯讀Demo不允許此操作。',
+            ], 403);
+        }
         // Always query the relation: loaded identity/session data is not authority.
         if (! $admin || ! $admin->permissions()->whereIn('code', $codes)->exists()) {
             return response()->json([

@@ -12,6 +12,11 @@ use Illuminate\Support\Facades\DB;
 
 class DashboardService
 {
+    public function demoSummary(): array
+    {
+        return ['products' => ['total' => Product::query()->count()], 'members' => null, 'orders' => null];
+    }
+
     public function summary(Admin $admin): array
     {
         // A loaded identity relation is not authority: read the current DB grants once.

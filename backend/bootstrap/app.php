@@ -26,6 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'member.active' => EnsureMemberIsActive::class,
             'admin.active' => EnsureAdminIsActive::class,
             'admin.permission' => EnsureAdminHasPermission::class,
+            'admin.demo-access' => \App\Http\Middleware\EnsureAdminDemoAccess::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

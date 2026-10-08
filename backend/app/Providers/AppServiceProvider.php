@@ -40,5 +40,7 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('member-register', fn (Request $request) => Limit::perMinute(3)
             ->by($request->ip())->response($tooManyAttempts));
+        RateLimiter::for('admin-demo', fn (Request $request) => Limit::perMinute(5)
+            ->by($request->ip())->response($tooManyAttempts));
     }
 }

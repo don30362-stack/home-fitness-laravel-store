@@ -49,11 +49,11 @@ class AdminPermissionRouteMappingTest extends TestCase
             $permissions = array_values(array_filter($middleware, fn ($m) => str_starts_with($m, 'admin.permission:')));
             if ($path === 'dashboard') {
                 $this->assertSame(['GET', 'HEAD'], $route->methods());
-                $this->assertSame(['api', 'auth:admin', 'admin.active'], $middleware);
+                $this->assertSame(['api', 'admin.demo-access', 'auth:admin', 'admin.active'], $middleware);
                 $this->assertSame([], $permissions);
                 continue;
             }
-            if (in_array($path, ['login', 'logout', 'me'])) {
+            if (in_array($path, ['login', 'demo', 'logout', 'me'])) {
                 $this->assertSame([], $permissions);
                 if ($path === 'logout') $this->assertNotContains('admin.active', $middleware);
                 continue;
@@ -61,13 +61,13 @@ class AdminPermissionRouteMappingTest extends TestCase
             $key = $route->methods()[0].' '.$path;
             $actual[$key] = [$key, substr($permissions[0] ?? '', 17)];
             $this->assertCount(1, $permissions);
-            $this->assertSame(['api', 'auth:admin', 'admin.active', $permissions[0]], $middleware);
+            $this->assertSame(['api', 'admin.demo-access', 'auth:admin', 'admin.active', $permissions[0]], $middleware);
             foreach (explode(',', substr($permissions[0], 17)) as $code) $this->assertArrayHasKey($code, Permission::CATALOG);
         }
         $expected = self::mapping(); ksort($actual); ksort($expected);
         $this->assertSame($expected, $actual);
         $this->assertCount(43, $actual);
-        $this->assertCount(82, Route::getRoutes());
+        $this->assertCount(83, Route::getRoutes());
     }
 
     #[DataProvider('mapping')]

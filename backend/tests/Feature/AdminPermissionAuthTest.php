@@ -26,7 +26,7 @@ class AdminPermissionAuthTest extends TestCase
         // Test-only integration routes. No production business mapping in Step 1.
         foreach (['single' => 'product_manage', 'or' => 'product_manage,home_content_manage'] as $path => $codes) {
             Route::get('/api/admin/permission-test/'.$path, fn () => response()->json(['message' => 'allowed']))
-                ->middleware(['api', 'auth:admin', 'admin.active', 'admin.permission:'.$codes]);
+                ->middleware(['api', 'admin.demo-access', 'auth:admin', 'admin.active', 'admin.permission:'.$codes]);
         }
     }
 
@@ -176,11 +176,11 @@ class AdminPermissionAuthTest extends TestCase
         foreach (Route::getRoutes() as $route) {
             $uri = $route->uri();
             if ($uri === 'api/admin/dashboard') {
-                $this->assertSame(['api', 'auth:admin', 'admin.active'], $route->gatherMiddleware());
+                $this->assertSame(['api', 'admin.demo-access', 'auth:admin', 'admin.active'], $route->gatherMiddleware());
                 continue;
             }
             if (str_starts_with($uri, 'api/admin/') && ! str_contains($uri, 'permission-test') &&
-                ! in_array($uri, ['api/admin/login', 'api/admin/logout', 'api/admin/me'], true)) {
+                ! in_array($uri, ['api/admin/login', 'api/admin/demo', 'api/admin/logout', 'api/admin/me'], true)) {
                 $this->assertContains('auth:admin', $route->gatherMiddleware());
                 $this->assertContains('admin.active', $route->gatherMiddleware());
                 $this->assertCount(1, array_filter($route->gatherMiddleware(), fn ($middleware) => str_starts_with($middleware, 'admin.permission:')));
