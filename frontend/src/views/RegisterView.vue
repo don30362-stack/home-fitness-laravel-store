@@ -65,10 +65,10 @@ const handleRegister = async () => {
 </script>
 
 <template>
-    <div class="container py-5">
+    <div class="container py-5 hf-functional-page hf-auth-page">
         <div class="row justify-content-center">
-            <div class="col-12 col-md-8 col-lg-5">
-                <h2 class="h2 mb-4 text-center">會員註冊</h2>
+            <div class="col-12 col-md-8 col-lg-5 hf-auth-panel">
+                <header class="hf-page-heading text-center"><p class="hf-eyebrow">JOIN HOME FIT</p><h1 class="h2">會員註冊</h1></header>
 
                 <div v-if="errorMessage" class="alert alert-danger" role="alert">
                     {{ errorMessage }}

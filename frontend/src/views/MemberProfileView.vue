@@ -119,7 +119,7 @@ const handlePasswordUpdate = async () => {
 </script>
 
 <template>
-  <section>
+  <section class="hf-account-section">
     <h2 class="h4 mb-4">基本資料</h2>
 
     <div v-if="profileMessage" class="alert alert-success" role="alert">
@@ -201,7 +201,7 @@ const handlePasswordUpdate = async () => {
       </div>
     </div>
 
-    <h4 class="h4 mt-5 mb-4">修改密碼</h4>
+    <h2 class="h4 mt-5 mb-4">修改密碼</h2>
 
     <div v-if="passwordMessage" class="alert alert-success" role="alert">
       {{ passwordMessage }}

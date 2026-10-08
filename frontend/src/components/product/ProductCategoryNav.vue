@@ -43,7 +43,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div>
+  <div class="product-category-nav">
     <h2 class="h5 mb-3">商品分類</h2>
 
     <p v-if="isLoading" class="text-muted">分類載入中...</p>
@@ -98,3 +98,9 @@ onMounted(() => {
     </ul>
   </div>
 </template>
+
+<style scoped>
+.product-category-nav a { color: var(--hf-charcoal, #2e2e2d); display: inline-block; padding-block: .35rem; min-height: 36px; overflow-wrap: anywhere; }
+.product-category-nav a:hover { text-decoration: underline !important; text-underline-offset: .3em; }
+.product-category-nav a.text-decoration-underline { text-decoration-color: var(--hf-gold) !important; text-underline-offset: .3em; }
+</style>

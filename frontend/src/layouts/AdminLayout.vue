@@ -37,4 +37,18 @@ const retry = async () => {
 <style scoped>
 .admin-shell, .admin-content { min-width: 0; width: 100%; overflow-wrap: anywhere; }
 :global(#app:has(.admin-shell)), :global(#app:has(.admin-login)) { display: block; width: 100%; }
+/* Workbench-only adjustments; storefront brand rules never reach Admin. */
+.admin-shell { background: #f5f6f8; color: #212529; }
+.admin-content :deep(header) { background: #fff; }
+.admin-content :deep(main > section) { min-width: 0; }
+.admin-shell :deep(.btn) { min-height: 40px; white-space: normal; }
+.admin-shell :deep(.form-control), .admin-shell :deep(.form-select) { min-height: 42px; }
+.admin-shell :deep(.form-label) { font-weight: 600; }
+.admin-shell :deep(.table-responsive) { max-width: 100%; background: #fff; border: 1px solid #dee2e6; border-radius: .3rem; }
+.admin-shell :deep(.table) { margin-bottom: 0; }
+.admin-shell :deep(.table th) { background: #f1f3f5; font-weight: 600; }
+.admin-shell :deep(.table td), .admin-shell :deep(.table th) { padding: .85rem; }
+.admin-shell :deep(.alert) { overflow-wrap: anywhere; }
+.admin-shell :deep(:focus-visible) { outline: 3px solid #0a58ca; outline-offset: 3px; }
+@media (max-width: 767.98px) { .admin-shell :deep(.btn) { min-height: 44px; } }
 </style>

@@ -404,10 +404,8 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="container py-5">
-        <h1 class="mb-4">
-            結帳
-        </h1>
+    <div class="container py-5 hf-functional-page hf-checkout-page">
+        <header class="hf-page-heading"><p class="hf-eyebrow">CHECKOUT</p><h1>結帳</h1></header>
 
         <div v-if="isLoading" class="text-center py-5">
             <div class="spinner-border" role="status" aria-label="載入中"></div>

@@ -13,7 +13,7 @@ const handleLogout = async () => {
 </script>
 
 <template>
-    <div class="container py-5">
+    <div class="container py-5 hf-functional-page hf-member-page">
         <div class="row g-4">
             <aside class="col-lg-3">
                 <div class="card">
@@ -24,17 +24,18 @@ const handleLogout = async () => {
                         </p>
                     </div>
 
-                    <nav class="list-group">
+                    <nav class="list-group hf-member-nav" aria-label="會員中心導覽">
                         <RouterLink :to="{ name: 'member-orders' }" class="list-group-item list-group-item-action"
-                            active-class="active">
+                            :class="{ 'hf-member-active': $route.path.startsWith('/member/orders') }"
+                            active-class="hf-member-active">
                             我的訂單
                         </RouterLink>
                         <RouterLink :to="{ name: 'member-profile' }" class="list-group-item list-group-item-action"
-                            active-class="active">
+                            active-class="hf-member-active">
                             基本資料
                         </RouterLink>
                         <RouterLink :to="{ name: 'member-addresses' }" class="list-group-item list-group-item-action"
-                            active-class="active">
+                            active-class="hf-member-active">
                             地址簿
                         </RouterLink>
                     </nav>
@@ -48,9 +49,9 @@ const handleLogout = async () => {
             </aside>
 
             <div class="col-lg-9">
-                <main>
+                <div class="hf-account-content">
                     <RouterView />
-                </main>
+                </div>
             </div>
         </div>
     </div>

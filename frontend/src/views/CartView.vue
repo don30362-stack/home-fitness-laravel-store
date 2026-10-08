@@ -309,9 +309,9 @@ const discardGuestCart = async () => {
 </script>
 
 <template>
-    <div class="container py-5">
+    <div class="container py-5 hf-functional-page hf-cart-page">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
-            <h1 class="h2 mb-0 flex-shrink-0">購物車</h1>
+            <div class="hf-page-heading mb-0"><p class="hf-eyebrow">YOUR TRAINING KIT</p><h1 class="h2 mb-0">購物車</h1></div>
 
             <div class="d-flex align-items-center gap-3">
                 <span class="text-muted">

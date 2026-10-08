@@ -111,7 +111,7 @@ onMounted(() => { loadAddresses() })
 
 <template>
     <section>
-        <div class="d-flex justify-content-between align-content-center mb-4">
+        <div class="d-flex flex-wrap gap-3 justify-content-between align-items-center mb-4">
             <h2 class="h4 mb-0">地址簿</h2>
 
             <button v-if="!isFormVisible" type="button" class="btn btn-dark" @click="openCreateForm">
@@ -145,16 +145,16 @@ onMounted(() => { loadAddresses() })
 
         <div v-else class="row g-3">
             <div v-for="address in addresses" :key="address.id" class="col-12">
-                <artical class="card">
+                <article class="card hf-address-card">
                     <div class="card-body p-4">
                         <div class="d-flex justify-content-between align-self-start gap-3">
                             <div>
-                                <div class="d-flex align-items-center gap-2 mb-2">
+                                <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
                                     <h3 class="h6 mb-0">{{ address.label }}</h3>
 
                                     <span v-if="address.is_default" class="badge text-bg-dark">預設地址</span>
 
-                                    <div class="d-flex gap-2">
+                                    <div class="d-flex flex-wrap gap-2 hf-address-actions">
                                         <button v-if="!address.is_default" type="button"
                                             class="btn btn-outline-secondary btn-sm"
                                             :disabled="processingAddressId === address.id"
@@ -188,7 +188,7 @@ onMounted(() => { loadAddresses() })
                             </div>
                         </div>
                     </div>
-                </artical>
+                </article>
             </div>
         </div>
     </section>

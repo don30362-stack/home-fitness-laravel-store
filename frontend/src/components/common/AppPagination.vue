@@ -62,3 +62,12 @@ const changePage = (page: number) => {
     </ul>
   </nav>
 </template>
+
+<style scoped>
+/* Page selection logic is unchanged; wrap long pagination locally until Step2's window. */
+.pagination { flex-wrap: wrap; gap: .4rem; }
+.page-link { min-width: 44px; min-height: 44px; display: grid; place-items: center; border-radius: .25rem !important; }
+.page-item + .page-item .page-link { margin-left: 0; }
+.page-link:focus-visible { outline: 3px solid var(--hf-gold, #0d6efd); outline-offset: 3px; box-shadow: none; }
+:global(.storefront-shell) .pagination { --bs-pagination-color: var(--hf-charcoal); --bs-pagination-border-color: var(--hf-stone); --bs-pagination-hover-color: var(--hf-black); --bs-pagination-hover-bg: var(--hf-ivory); --bs-pagination-hover-border-color: var(--hf-charcoal); --bs-pagination-active-bg: var(--hf-charcoal); --bs-pagination-active-border-color: var(--hf-charcoal); --bs-pagination-focus-color: var(--hf-charcoal); --bs-pagination-focus-bg: var(--hf-ivory); }
+</style>

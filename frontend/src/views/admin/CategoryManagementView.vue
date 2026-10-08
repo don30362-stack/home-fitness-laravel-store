@@ -166,7 +166,7 @@ onBeforeUnmount(() => { disposed = true; requestSequence++ })
         <div class="card-header">
           <h2 class="h5 mb-2">{{ category.name }}</h2>
           <button type="button" class="btn btn-sm btn-outline-secondary mb-2" :disabled="mutationPending" @click="openForm('root', category)">編輯主分類</button>
-          <button type="button" class="btn btn-sm btn-outline-warning mb-2 ms-2" :disabled="mutationPending" @click="openStatus(category, 'root')">{{ category.status === 'active' ? '停用主分類' : '啟用主分類' }}</button>
+          <button type="button" class="btn btn-sm btn-category-status mb-2 ms-2" :disabled="mutationPending" @click="openStatus(category, 'root')">{{ category.status === 'active' ? '停用主分類' : '啟用主分類' }}</button>
           <button type="button" class="btn btn-sm btn-outline-danger mb-2 ms-2" :disabled="mutationPending" @click="openDelete(category, 'root')">刪除主分類</button>
           <div class="d-flex flex-wrap gap-3 small">
             <span>狀態：{{ statusLabel(category.status) }}</span>
@@ -178,7 +178,7 @@ onBeforeUnmount(() => { disposed = true; requestSequence++ })
           <li v-for="child in category.children" :key="child.id" class="list-group-item">
             <h3 class="h6 mb-2">{{ child.name }}</h3>
             <button type="button" class="btn btn-sm btn-outline-secondary mb-2" :disabled="mutationPending" @click="openForm('child', child)">編輯子分類</button>
-            <button type="button" class="btn btn-sm btn-outline-warning mb-2 ms-2" :disabled="mutationPending" @click="openStatus(child, 'child')">{{ child.status === 'active' ? '停用子分類' : '啟用子分類' }}</button>
+            <button type="button" class="btn btn-sm btn-category-status mb-2 ms-2" :disabled="mutationPending" @click="openStatus(child, 'child')">{{ child.status === 'active' ? '停用子分類' : '啟用子分類' }}</button>
             <button type="button" class="btn btn-sm btn-outline-danger mb-2 ms-2" :disabled="mutationPending" @click="openDelete(child, 'child')">刪除子分類</button>
             <div class="d-flex flex-wrap gap-3 small">
               <span>狀態：{{ statusLabel(child.status) }}</span>
@@ -192,3 +192,8 @@ onBeforeUnmount(() => { disposed = true; requestSequence++ })
     </div>
   </section>
 </template>
+
+<style scoped>
+/* Dark warning ink on a pale background preserves meaning and readable contrast. */
+.btn-category-status { --bs-btn-color: #755300; --bs-btn-border-color: #967019; --bs-btn-hover-color: #513a00; --bs-btn-hover-bg: #fff3cd; --bs-btn-hover-border-color: #755300; --bs-btn-active-color: #513a00; --bs-btn-active-bg: #ffe69c; --bs-btn-active-border-color: #755300; --bs-btn-disabled-color: #755300; --bs-btn-disabled-border-color: #967019; }
+</style>

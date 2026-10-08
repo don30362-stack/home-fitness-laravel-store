@@ -57,10 +57,9 @@ watch(
 
 <template>
     <div>
-        <div class="border rounded bg-light d-flex align-items-center justify-content-center mb-3"
-            style="min-height: 480px;">
+        <div class="product-gallery-stage d-flex align-items-center justify-content-center mb-3">
             <img v-if="selectedImage && !hasImageFailed(selectedImage.id)" :src="selectedImage.image_url"
-                :alt="productName" class="img-fluid" style="max-height: 480px; object-fit: contain;"
+                :alt="productName" class="product-gallery-image img-fluid"
                 @error="handleImageError(selectedImage.id)">
 
             <span v-else class="text-muted">商品圖片準備中</span>
@@ -79,3 +78,7 @@ watch(
         </div>
     </div>
 </template>
+<style scoped>
+.product-gallery-stage { aspect-ratio: 1; background: var(--hf-ivory, #f5f2ec); border: 1px solid var(--hf-stone, #d8d3ca); min-width: 0; padding: .5rem; }
+.product-gallery-image { width: 100%; height: 100%; max-height: 560px; object-fit: contain; }
+</style>

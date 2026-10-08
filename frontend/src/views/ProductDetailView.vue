@@ -218,7 +218,7 @@ watch(
 </script>
 
 <template>
-    <div class="container py-5">
+    <div class="container py-5 hf-functional-page hf-product-detail">
         <p v-if="isLoading">
             商品載入中...
         </p>
@@ -228,12 +228,12 @@ watch(
         </p>
 
         <div v-else-if="product">
-            <div class="row g-5">
-                <div class="col-12 col-lg-6">
+            <div class="product-detail-grid">
+                <div class="product-detail-media">
                     <ProductGallery :images="product.images" :product-name="product.name" />
                 </div>
 
-                <div class="col-12 col-lg-6">
+                <div class="product-detail-info">
                     <p class="text-muted mb-2"> {{ product.category.name }}</p>
 
                     <h1 class="mb-3">{{ product.name }}</h1>
@@ -242,7 +242,7 @@ watch(
                         商品編號：{{ product.product_code }}
                     </p>
 
-                    <p class="fs-3 fw-bold">
+                    <p class="fs-3 fw-bold hf-product-price">
                         NT$ {{ Number(product.price).toLocaleString('zh-TW') }}
                     </p>
 
@@ -350,3 +350,13 @@ watch(
         </div>
     </div>
 </template>
+<style scoped>
+/* Explicit grid gaps stay inside the container; no Bootstrap negative gutter margins. */
+.product-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2rem; }
+.product-detail-grid > * { min-width: 0; }
+.product-detail-info h1 { font-size: clamp(1.7rem, 3vw, 2.5rem); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.hf-product-price { padding-block: 1rem; border-block: 1px solid var(--hf-stone); }
+.hf-product-detail section { padding-bottom: 1rem; }
+.hf-product-detail :is(dt, dd, p) { overflow-wrap: anywhere; }
+@media (min-width: 992px) { .product-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3rem; } }
+</style>

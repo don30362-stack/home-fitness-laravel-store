@@ -54,7 +54,7 @@ onBeforeUnmount(() => { ++requestId })
 </script>
 
 <template>
-  <section aria-labelledby="orders-title">
+  <section class="hf-account-section hf-member-orders" aria-labelledby="orders-title">
     <h2 id="orders-title" class="h4 mb-4">我的訂單</h2>
     <p v-if="isLoading" role="status">訂單載入中…</p>
     <div v-else-if="errorMessage" class="alert alert-danger" role="alert">
@@ -97,7 +97,7 @@ onBeforeUnmount(() => { ++requestId })
   }
 
   .table, .table tbody, .table tr { display: block; }
-  .table tr { margin-bottom: 1rem; border: 1px solid var(--bs-border-color); }
+  .table tr { margin-bottom: 1rem; border: 1px solid var(--hf-stone); }
   .table td {
     display: grid;
     grid-template-columns: 5rem minmax(0, 1fr);
@@ -105,5 +105,11 @@ onBeforeUnmount(() => { ++requestId })
     overflow-wrap: anywhere;
   }
   .table td::before { content: attr(data-label); font-weight: 600; }
+}
+.table td a { color: var(--hf-charcoal); font-weight: 600; text-decoration: underline; text-underline-offset: .25em; }
+@media (max-width: 767.98px) {
+ .table tr { background: var(--hf-white); padding: .65rem; border-radius: .35rem; }
+ .table td { border-bottom-color: var(--hf-stone); padding-block: .75rem; }
+ .table td:last-child { border-bottom: 0; }
 }
 </style>

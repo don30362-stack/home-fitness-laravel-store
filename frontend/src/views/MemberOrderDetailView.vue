@@ -92,7 +92,7 @@ onBeforeUnmount(() => { ++requestId })
 </script>
 
 <template>
-  <section aria-labelledby="order-title">
+  <section class="hf-account-section hf-order-detail" aria-labelledby="order-title">
     <h2 id="order-title" class="h4 mb-4">訂單詳細</h2>
     <RouterLink :to="{ name: 'member-orders' }" class="btn btn-outline-secondary mb-4">返回我的訂單</RouterLink>
     <p v-if="isLoading" role="status">訂單載入中…</p>
@@ -103,7 +103,7 @@ onBeforeUnmount(() => { ++requestId })
     <div v-else-if="order">
       <p v-if="cancelSuccess" class="alert alert-success" role="status">{{ cancelSuccess }}</p>
       <p v-if="cancelError" class="alert alert-danger" role="alert">{{ cancelError }}</p>
-      <dl class="row">
+      <dl class="row hf-order-summary">
         <dt class="col-sm-4">訂單編號</dt><dd class="col-sm-8 text-break">{{ order.order_no }}</dd>
         <dt class="col-sm-4">成立時間</dt><dd class="col-sm-8">{{ date(order.created_at) }}</dd>
         <dt class="col-sm-4">付款方式</dt><dd class="col-sm-8">{{ methodLabels[order.payment_method] ?? order.payment_method }}</dd>
@@ -114,7 +114,7 @@ onBeforeUnmount(() => { ++requestId })
         <button type="button" class="btn btn-outline-danger" :disabled="isSubmitting" @click="confirmCancellation">取消訂單</button>
         <div v-if="isConfirmingCancel" class="alert alert-warning mt-3" role="group" aria-label="取消訂單確認">
           <p>確定要取消這筆訂單嗎？</p>
-          <div class="d-flex gap-2">
+          <div class="d-flex flex-wrap gap-2">
             <button type="button" class="btn btn-danger" :disabled="isSubmitting" @click="submitCancellation">確認取消</button>
             <button type="button" class="btn btn-outline-secondary" :disabled="isSubmitting" @click="isConfirmingCancel = false">保留訂單</button>
           </div>
@@ -127,7 +127,7 @@ onBeforeUnmount(() => { ++requestId })
           <caption class="visually-hidden">訂單商品快照</caption>
           <thead><tr><th scope="col">商品</th><th scope="col">規格</th><th scope="col">數量</th><th scope="col">單價</th><th scope="col">小計</th></tr></thead>
           <tbody><tr v-for="item in order.items" :key="item.id">
-            <td>{{ item.product_name }}<small class="d-block text-muted">{{ item.product_code }}</small></td>
+            <td class="hf-order-item-name">{{ item.product_name }}<small class="d-block text-muted">{{ item.product_code }}</small></td>
             <td>{{ item.variant ?? '無規格' }}</td><td>{{ item.quantity }}</td>
             <td>{{ money(item.unit_price) }}</td><td>{{ money(item.subtotal) }}</td>
           </tr></tbody>
@@ -157,3 +157,11 @@ onBeforeUnmount(() => { ++requestId })
     </div>
   </section>
 </template>
+
+<style scoped>
+.hf-order-summary { padding: 1.5rem 1rem; margin-inline: 0; background: var(--hf-ivory); border-top: 2px solid var(--hf-gold); }
+.hf-order-detail dd { overflow-wrap: anywhere; margin-bottom: 1rem; }
+.hf-order-detail dt { font-size: .9rem; color: #595951; }
+.hf-order-detail table { min-width: 34rem; }
+.hf-order-item-name { min-width: 12rem; max-width: 25rem; overflow-wrap: anywhere; }
+</style>

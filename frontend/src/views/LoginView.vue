@@ -85,10 +85,10 @@ const handleLogin = async () => {
 </script>
 
 <template>
-  <div class="container py-5">
+  <div class="container py-5 hf-functional-page hf-auth-page">
     <div class="row justify-content-center">
-      <div class="col-12 col-md-8 col-lg-5">
-        <h1 class="h2 mb-4 text-center">會員登入</h1>
+      <div class="col-12 col-md-8 col-lg-5 hf-auth-panel">
+        <header class="hf-page-heading text-center"><p class="hf-eyebrow">WELCOME BACK</p><h1 class="h2">會員登入</h1></header>
 
         <div v-if="isRegistered" class="alert alert-success" role="alert">
           會員註冊成功，請登入。

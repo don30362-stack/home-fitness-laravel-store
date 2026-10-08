@@ -26,6 +26,7 @@ const sortOption = ref<ProductSort | ''>('')
 const minPriceInput = ref<number | ''>('')
 const maxPriceInput = ref<number | ''>('')
 const priceFilterError = ref('')
+const filtersOpen = ref(false)
 
 const hasQueryConditions = computed(() => {
   return (
@@ -270,101 +271,49 @@ watch(
 </script>
 
 <template>
-  <div class="container py-5">
+  <div class="container py-5 hf-functional-page hf-products-page">
+    <header class="hf-page-heading"><p class="hf-eyebrow">TRAINING EQUIPMENT</p><h1>商品列表</h1><p class="text-muted mb-0">為日常訓練，找到合適的器材。</p></header>
     <div class="row g-4">
-      <aside class="col-12 col-lg-3">
-        <ProductCategoryNav />
+      <aside class="col-12 col-md-4 col-lg-3">
+        <button type="button" class="btn btn-outline-dark product-filter-toggle" :aria-expanded="filtersOpen" aria-controls="product-filters" @click="filtersOpen = !filtersOpen">分類與篩選 <span aria-hidden="true">{{ filtersOpen ? '−' : '+' }}</span></button>
+        <div id="product-filters" class="product-filters-panel" :class="{ 'is-open': filtersOpen }">
+          <ProductCategoryNav />
+          <div class="mt-4 pt-4 border-top">
+            <label for="product-sort" class="form-label">商品排序</label>
+            <select id="product-sort" v-model="sortOption" class="form-select" aria-label="商品排序" @change="handleSortChange">
+              <option value="">預設排序</option><option value="price_asc">價格低到高</option><option value="price_desc">價格高到低</option>
+            </select>
+          </div>
+          <form class="mt-4" @submit.prevent="handlePriceFilter">
+            <div class="mb-3"><label for="min-price" class="form-label">最低價格</label><input id="min-price" v-model="minPriceInput" type="number" min="0" class="form-control" placeholder="最低價格" /></div>
+            <div class="mb-3"><label for="max-price" class="form-label">最高價格</label><input id="max-price" v-model="maxPriceInput" type="number" min="0" class="form-control" placeholder="最高價格" /></div>
+            <button type="submit" class="btn btn-outline-dark w-100">套用價格</button>
+            <p v-if="priceFilterError" class="text-danger mt-2 mb-0">{{ priceFilterError }}</p>
+          </form>
+        </div>
       </aside>
-
-      <section class="col-12 col-lg-9">
-        <h1 class="mb-4">商品列表</h1>
-
+      <section class="col-12 col-md-8 col-lg-9" aria-label="商品搜尋結果">
         <form class="mb-4" @submit.prevent="handleSearch">
-          <div class="input-group">
-            <input
-              v-model="searchKeyword"
-              type="search"
-              class="form-control"
-              placeholder="搜尋商品名稱"
-              aria-label="搜尋商品名稱"
-            />
-            <button class="btn btn-dark" type="submit">搜尋</button>
-          </div>
+          <div class="input-group"><input v-model="searchKeyword" type="search" class="form-control" placeholder="搜尋商品名稱" aria-label="搜尋商品名稱" /><button class="btn btn-dark" type="submit">搜尋</button></div>
         </form>
-
-        <div class="d-flex justify-content-end mb-4">
-          <select
-            v-model="sortOption"
-            class="form-select w-auto"
-            aria-label="商品排序"
-            @change="handleSortChange"
-          >
-            <option value="">預設排序</option>
-            <option value="price_asc">價格低到高</option>
-            <option value="price_desc">價格高到低</option>
-          </select>
-        </div>
-
-        <form class="mb-4" @submit.prevent="handlePriceFilter">
-          <div class="row align-items-end">
-            <div class="col-12 col-md">
-              <label for="min-price" class="form-label"> 最低價格 </label>
-              <input
-                id="min-price"
-                v-model="minPriceInput"
-                type="number"
-                min="0"
-                class="form-control"
-                placeholder="最低價格"
-              />
-            </div>
-
-            <div class="col-12 col-md">
-              <label for="max-price" class="form-label"> 最高價格 </label>
-              <input
-                id="max-price"
-                v-model="maxPriceInput"
-                type="number"
-                min="0"
-                class="form-control"
-                placeholder="最高價格"
-              />
-            </div>
-
-            <div class="col-12 col-md-auto">
-              <button type="submit" class="btn btn-outline-dark">套用價格</button>
-            </div>
-          </div>
-
-          <p v-if="priceFilterError" class="text-danger mt-2 mb-0">
-            {{ priceFilterError }}
-          </p>
-        </form>
-
         <p v-if="isLoading">商品載入中...</p>
-
         <p v-else-if="errorMessage" class="text-danger">{{ errorMessage }}</p>
-
-        <div v-else-if="products.length === 0">
-          <p class="text-muted">
-            {{ hasQueryConditions ? '找不到符合條件的商品。' : '目前沒有商品。' }}
-          </p>
-        </div>
-
+        <div v-else-if="products.length === 0" class="hf-empty-state"><p class="text-muted mb-0">{{ hasQueryConditions ? '找不到符合條件的商品。' : '目前沒有商品。' }}</p></div>
         <template v-else>
-          <div class="row g-4">
-            <div v-for="product in products" :key="product.id" class="col-12 col-sm-6 col-xl-4">
-              <ProductCard :product="product" />
-            </div>
-          </div>
-
-          <AppPagination
-            :current-page="pagination.current_page"
-            :last-page="pagination.last_page"
-            @change-page="handlePageChange"
-          />
+          <p class="small text-muted mb-4">共 {{ pagination.total }} 項商品 · 第 {{ pagination.current_page }} 頁</p>
+          <div class="row g-4"><div v-for="product in products" :key="product.id" class="col-12 col-sm-6 col-xl-4"><ProductCard :product="product" /></div></div>
+          <AppPagination :current-page="pagination.current_page" :last-page="pagination.last_page" @change-page="handlePageChange" />
         </template>
       </section>
     </div>
   </div>
 </template>
+<style scoped>
+.product-filters-panel { padding: 1.25rem; background: var(--hf-ivory); border: 1px solid var(--hf-stone); }
+.product-filter-toggle { display: none; }
+@media (max-width: 767.98px) {
+ .product-filter-toggle { display: flex; justify-content: space-between; width: 100%; }
+ .product-filters-panel { display: none; margin-top: .75rem; }
+ .product-filters-panel.is-open { display: block; }
+}
+</style>
