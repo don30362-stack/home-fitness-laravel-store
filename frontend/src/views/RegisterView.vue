@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import axios from 'axios';
+import type { ApiErrorResponse } from '@/types/api';
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 
@@ -50,7 +51,7 @@ const handleRegister = async () => {
         })
 
     } catch (error) {
-        if (axios.isAxiosError(error)) {
+        if (axios.isAxiosError<ApiErrorResponse>(error)) {
             if (error.response?.status === 422) {
                 fieldErrors.value = error.response.data?.errors ?? {}
             }
@@ -79,9 +80,9 @@ const handleRegister = async () => {
                         <label for="name" class="form-label">姓名</label>
 
                         <input id="name" v-model="name" type="text" class="form-control"
-                            :class="{ 'is-invalid': fieldErrors.name }" maxlength="50" autocomplete="name" required>
+                            :class="{ 'is-invalid': fieldErrors.name }" :aria-invalid="!!fieldErrors.name" :aria-describedby="fieldErrors.name ? 'address-error-name' : undefined" maxlength="50" autocomplete="name" required>
 
-                        <div v-if="fieldErrors.name" class="invalid-feedback">
+                        <div v-if="fieldErrors.name" id="address-error-name" class="invalid-feedback">
                             {{ fieldErrors.name[0] }}
                         </div>
                     </div>
@@ -90,9 +91,9 @@ const handleRegister = async () => {
                         <label for="email" class="form-label">電子郵件</label>
 
                         <input id="email" v-model="email" type="email" class="form-control"
-                            :class="{ 'is-invalid': fieldErrors.email }" maxlength="255" autocomplete="email" required>
+                            :class="{ 'is-invalid': fieldErrors.email }" :aria-invalid="!!fieldErrors.email" :aria-describedby="fieldErrors.email ? 'address-error-email' : undefined" maxlength="255" autocomplete="email" required>
 
-                        <div v-if="fieldErrors.email" class="invalid-feedback">
+                        <div v-if="fieldErrors.email" id="address-error-email" class="invalid-feedback">
                             {{ fieldErrors.email[0] }}
                         </div>
                     </div>
@@ -101,9 +102,9 @@ const handleRegister = async () => {
                         <label for="phone" class="form-label">電話</label>
 
                         <input id="phone" v-model="phone" type="tel" class="form-control"
-                            :class="{ 'is-invalid': fieldErrors.phone }" maxlength="20" autocomplete="tel" required>
+                            :class="{ 'is-invalid': fieldErrors.phone }" :aria-invalid="!!fieldErrors.phone" :aria-describedby="fieldErrors.phone ? 'address-error-phone' : undefined" maxlength="20" autocomplete="tel" required>
 
-                        <div v-if="fieldErrors.phone" class="invalid-feedback">
+                        <div v-if="fieldErrors.phone" id="address-error-phone" class="invalid-feedback">
                             {{ fieldErrors.phone[0] }}
                         </div>
                     </div>
@@ -112,10 +113,10 @@ const handleRegister = async () => {
                         <label for="password" class="form-label">密碼</label>
 
                         <input id="password" v-model="password" type="password" class="form-control"
-                            :class="{ 'is-invalid': fieldErrors.password }" minlength="8" autocomplete="new-password"
+                            :class="{ 'is-invalid': fieldErrors.password }" :aria-invalid="!!fieldErrors.password" :aria-describedby="fieldErrors.password ? 'address-error-password' : undefined" minlength="8" autocomplete="new-password"
                             required>
 
-                        <div v-if="fieldErrors.password" class="invalid-feedback">
+                        <div v-if="fieldErrors.password" id="address-error-password" class="invalid-feedback">
                             {{ fieldErrors.password[0] }}
                         </div>
                     </div>

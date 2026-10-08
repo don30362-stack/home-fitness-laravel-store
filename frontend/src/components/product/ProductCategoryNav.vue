@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { getCategories } from '@/services/categoryService'
@@ -23,17 +23,24 @@ const isSubcategoryActive = (id: number) => {
   return Number(route.query.category_id) === id
 }
 
+let sequence = 0
+let disposed = false
+onBeforeUnmount(() => { disposed = true; ++sequence })
 const fetchCategories = async () => {
+  if (isLoading.value || disposed) return
+  const current = ++sequence
+  const valid = () => !disposed && current === sequence
   isLoading.value = true
   errorMessage.value = ''
 
   try {
-    categories.value = await getCategories()
+    const result = await getCategories()
+    if (valid()) categories.value = result
   } catch (error) {
-    console.error(error)
+    if (!valid()) return
     errorMessage.value = '分類載入失敗'
   } finally {
-    isLoading.value = false
+    if (valid()) isLoading.value = false
   }
 }
 
@@ -48,9 +55,7 @@ onMounted(() => {
 
     <p v-if="isLoading" class="text-muted">分類載入中...</p>
 
-    <p v-else-if="errorMessage" class="text-danger">
-      {{ errorMessage }}
-    </p>
+    <div v-else-if="errorMessage" role="alert" class="text-danger"><p>{{ errorMessage }}</p><button type="button" class="btn btn-outline-dark" :disabled="isLoading" @click="fetchCategories">重新載入分類</button></div>
 
     <div v-else-if="categories.length === 0" class="text-muted">目前沒有商品分類。</div>
 

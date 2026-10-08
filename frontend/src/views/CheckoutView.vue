@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { isAxiosError } from 'axios'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import { getAddresses } from '@/services/addressService'
@@ -17,6 +17,9 @@ import type { City, District } from '@/types/location'
 const authStore = useAuthStore()
 const cartStore = useCartStore()
 
+let disposed = false, loadSequence = 0, districtSequence = 0
+let initialized = false
+onBeforeUnmount(() => { disposed = true; ++loadSequence; ++districtSequence })
 const shippingFee = 100
 
 const addresses = ref<UserAddress[]>([])
@@ -108,6 +111,10 @@ const handleSavedAddressChange = () => {
 }
 
 const handleCityChange = async () => {
+    const current = ++districtSequence
+    const cityId = selectedCityId.value
+    const valid = () => !disposed && current === districtSequence && cityId === selectedCityId.value
+    isDistrictsLoading.value = false
     form.recipient.district_id = null
     districts.value = []
     addressErrorMessage.value = ''
@@ -123,12 +130,13 @@ const handleCityChange = async () => {
             selectedCityId.value,
         )
 
-        districts.value = response.data
+        if (valid()) districts.value = response.data
     } catch {
+        if (!valid()) return
         addressErrorMessage.value =
             '行政區資料載入失敗，請稍後再試。'
     } finally {
-        isDistrictsLoading.value = false
+        if (valid()) isDistrictsLoading.value = false
     }
 }
 
@@ -144,6 +152,8 @@ const handleSameAsPurchaserChange = () => {
 }
 
 const handleAddressModeChange = () => {
+    ++districtSequence
+    isDistrictsLoading.value = false
     addressErrorMessage.value = ''
     sameAsPurchaser.value = false
     selectedCityId.value = null
@@ -220,6 +230,11 @@ const buildCheckoutPayload =
         if (!/^09[0-9]{8}$/.test(recipientPhone)) {
             submitErrorMessage.value =
                 '請輸入正確的收件人手機號碼。'
+            return null
+        }
+
+        if (addressMode.value === 'new' && selectedDistrict.value === null) {
+            submitErrorMessage.value = '請選擇目前縣市的行政區。'
             return null
         }
 
@@ -310,6 +325,9 @@ const handleSubmit = async () => {
 }
 
 const loadCheckoutData = async () => {
+    if (isLoading.value || isSubmitting.value || createdOrder.value || disposed) return
+    const current = ++loadSequence
+    const valid = () => !disposed && current === loadSequence
     errorMessage.value = ''
 
     const currentUser = authStore.currentUser
@@ -319,9 +337,9 @@ const loadCheckoutData = async () => {
         return
     }
 
-    form.purchaser.name = currentUser.name
-    form.purchaser.phone = currentUser.phone
-    form.purchaser.email = currentUser.email
+    if (!form.purchaser.name) form.purchaser.name = currentUser.name
+    if (!form.purchaser.phone) form.purchaser.phone = currentUser.phone
+    if (!form.purchaser.email) form.purchaser.email = currentUser.email
 
     isLoading.value = true
 
@@ -336,6 +354,7 @@ const loadCheckoutData = async () => {
             getCities(),
         ])
 
+        if (!valid()) return
         addresses.value = addressResponse.data
         cities.value = cityResponse.data
 
@@ -358,17 +377,19 @@ const loadCheckoutData = async () => {
             addresses.value[0] ??
             null
 
-        if (defaultAddress !== null) {
+        if (!initialized && selectedAddressId.value === null && !form.recipient.address && defaultAddress !== null) {
             selectedAddressId.value = defaultAddress.id
             applyAddress(defaultAddress)
-        } else {
+        } else if (!initialized && defaultAddress === null) {
             addressMode.value = 'new'
         }
+        initialized = true
     } catch {
+        if (!valid()) return
         errorMessage.value =
             '結帳資料載入失敗，請稍後再試。'
     } finally {
-        isLoading.value = false
+        if (valid()) isLoading.value = false
     }
 }
 
@@ -418,6 +439,7 @@ onMounted(() => {
         <div v-else-if="errorMessage" class="alert alert-warning" role="alert">
             <p class="mb-3">
                 {{ errorMessage }}
+                <button type="button" class="btn btn-outline-dark ms-2" :disabled="isLoading || isSubmitting" @click="loadCheckoutData">重新載入結帳資料</button>
             </p>
 
             <RouterLink class="btn btn-outline-dark" :to="{ name: 'cart' }">

@@ -1,26 +1,26 @@
 import type { RouteRecordRaw, NavigationGuard, Router } from 'vue-router'
 import { useAdminAuthStore } from '@/stores/adminAuth'
 import AdminLayout from '@/layouts/AdminLayout.vue'
-import AdminLoginView from '@/views/admin/AdminLoginView.vue'
-import AdminDashboardView from '@/views/admin/AdminDashboardView.vue'
-import AdminNotFoundView from '@/views/admin/AdminNotFoundView.vue'
-import ProductManagementView from '@/views/admin/ProductManagementView.vue'
-import InventoryManagementView from '@/views/admin/InventoryManagementView.vue'
-import CategoryManagementView from '@/views/admin/CategoryManagementView.vue'
-import HomeContentManagementView from '@/views/admin/HomeContentManagementView.vue'
-import OrderManagementView from '@/views/admin/OrderManagementView.vue'
-import AdminOrderDetailView from '@/views/admin/AdminOrderDetailView.vue'
-import MemberManagementView from '@/views/admin/MemberManagementView.vue'
-import AdminUserDetailView from '@/views/admin/AdminUserDetailView.vue'
-import AdminProductDetailView from '@/views/admin/AdminProductDetailView.vue'
-import AdminProductFormView from '@/views/admin/AdminProductFormView.vue'
+const AdminLoginView = () => import('@/views/admin/AdminLoginView.vue')
+const AdminDashboardView = () => import('@/views/admin/AdminDashboardView.vue')
+const AdminNotFoundView = () => import('@/views/admin/AdminNotFoundView.vue')
+const ProductManagementView = () => import('@/views/admin/ProductManagementView.vue')
+const InventoryManagementView = () => import('@/views/admin/InventoryManagementView.vue')
+const CategoryManagementView = () => import('@/views/admin/CategoryManagementView.vue')
+const HomeContentManagementView = () => import('@/views/admin/HomeContentManagementView.vue')
+const OrderManagementView = () => import('@/views/admin/OrderManagementView.vue')
+const AdminOrderDetailView = () => import('@/views/admin/AdminOrderDetailView.vue')
+const MemberManagementView = () => import('@/views/admin/MemberManagementView.vue')
+const AdminUserDetailView = () => import('@/views/admin/AdminUserDetailView.vue')
+const AdminProductDetailView = () => import('@/views/admin/AdminProductDetailView.vue')
+const AdminProductFormView = () => import('@/views/admin/AdminProductFormView.vue')
 import { setAdminNavigationCallbacks } from '@/services/adminSessionNavigation'
 
 import { adminModules } from './adminModules'
 import { ADMIN_PAGE_METADATA } from './pageMetadata'
 export { adminModules } from './adminModules'
-import AdminManagementView from '@/views/admin/AdminManagementView.vue'
-import AdminForbiddenView from '@/views/admin/AdminForbiddenView.vue'
+const AdminManagementView = () => import('@/views/admin/AdminManagementView.vue')
+const AdminForbiddenView = () => import('@/views/admin/AdminForbiddenView.vue')
 import type { AdminPermissionCode } from '@/types/adminAuth'
 
 declare module 'vue-router' {

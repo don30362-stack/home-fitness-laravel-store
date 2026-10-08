@@ -1,3 +1,4 @@
+import { parseGuestCart } from '@/utils/guestCartStorage'
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { ensureSessionVersion, getSessionVersion } from '@/services/sessionState'
@@ -28,25 +29,8 @@ const GUEST_CART_STORAGE_KEY =
     'home-fitness-store-guest-cart'
 
 const loadGuestItems = (): GuestCartItem[] => {
-    const storedCart = localStorage.getItem(
-        GUEST_CART_STORAGE_KEY,
-    )
-
-    if (storedCart === null) {
-        return []
-    }
-
-    try {
-        const parsedCart: unknown = JSON.parse(storedCart)
-
-        return Array.isArray(parsedCart)
-            ? (parsedCart as GuestCartItem[])
-            : []
-    } catch {
-        localStorage.removeItem(GUEST_CART_STORAGE_KEY)
-
-        return []
-    }
+    try { return parseGuestCart(localStorage.getItem(GUEST_CART_STORAGE_KEY)) }
+    catch { return [] } // Browser storage can be unavailable (privacy/quota policies).
 }
 
 const createItemKey = (

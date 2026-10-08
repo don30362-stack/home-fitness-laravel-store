@@ -6,20 +6,20 @@ import { applyPageMetadata } from './pageMetadata'
 
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
 import HomeView from '@/views/HomeView.vue'
-import AboutView from '@/views/AboutView.vue'
-import FAQView from '@/views/FAQView.vue'
-import ProductListView from '@/views/ProductListView.vue'
-import ProductDetailView from '@/views/ProductDetailView.vue'
-import CartView from '@/views/CartView.vue'
-import CheckoutView from '@/views/CheckoutView.vue'
-import LoginView from '@/views/LoginView.vue'
-import RegisterView from '@/views/RegisterView.vue'
-import MemberView from '@/views/MemberView.vue'
-import NotFoundView from '@/views/NotFoundView.vue'
-import MemberProfileView from '@/views/MemberProfileView.vue'
-import MemberAddressView from '@/views/MemberAddressView.vue'
-import MemberOrderListView from '@/views/MemberOrderListView.vue'
-import MemberOrderDetailView from '@/views/MemberOrderDetailView.vue'
+const AboutView = () => import('@/views/AboutView.vue')
+const FAQView = () => import('@/views/FAQView.vue')
+const ProductListView = () => import('@/views/ProductListView.vue')
+const ProductDetailView = () => import('@/views/ProductDetailView.vue')
+const CartView = () => import('@/views/CartView.vue')
+const CheckoutView = () => import('@/views/CheckoutView.vue')
+const LoginView = () => import('@/views/LoginView.vue')
+const RegisterView = () => import('@/views/RegisterView.vue')
+const MemberView = () => import('@/views/MemberView.vue')
+const NotFoundView = () => import('@/views/NotFoundView.vue')
+const MemberProfileView = () => import('@/views/MemberProfileView.vue')
+const MemberAddressView = () => import('@/views/MemberAddressView.vue')
+const MemberOrderListView = () => import('@/views/MemberOrderListView.vue')
+const MemberOrderDetailView = () => import('@/views/MemberOrderDetailView.vue')
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { getAddresses, setDefaultAddress, deleteAddress } from '@/services/addressService';
 import type { UserAddress } from '@/types/address';
-import { ref, onMounted } from 'vue';
+import { computed, ref, onBeforeUnmount, onMounted } from 'vue';
 import UserAddressForm from '@/components/member/UserAddressForm.vue';
 
 const addresses = ref<UserAddress[]>([])
@@ -14,46 +14,62 @@ const selectedAddress = ref<UserAddress | null>(null)
 
 const processingAddressId = ref<number | null>(null)
 
+const formSubmitting = ref(false)
+const refreshNeeded = ref(false)
+const mutationBlocked = computed(() => formSubmitting.value || processingAddressId.value !== null || isLoading.value || refreshNeeded.value)
+let disposed = false, sequence = 0
+onBeforeUnmount(() => { disposed = true; ++sequence })
 const loadAddresses = async () => {
+    if (isLoading.value && sequence > 0 || disposed) return
+    const current = ++sequence
+    const valid = () => !disposed && current === sequence
     isLoading.value = true
     errorMessage.value = ''
 
     try {
         const response = await getAddresses()
+        if (!valid()) return
         addresses.value = response.data
+        refreshNeeded.value = false
     } catch {
-        errorMessage.value = '地址資料載入失敗，請稍後再試'
+        if (!valid()) return
+        refreshNeeded.value = true
+        errorMessage.value = successMessage.value ? '操作已成功，但地址清單刷新失敗，清單可能過時。請重新載入後再操作。' : '地址資料載入失敗，請稍後再試'
     } finally {
-        isLoading.value = false
+        if (valid()) isLoading.value = false
     }
 }
 
 const openCreateForm = () => {
+    if (mutationBlocked.value) return
     selectedAddress.value = null
     successMessage.value = ''
     isFormVisible.value = true
 }
 
 const openEditForm = (address: UserAddress) => {
+    if (mutationBlocked.value) return
     selectedAddress.value = address
     successMessage.value = ''
     isFormVisible.value = true
 }
 
 const closeForm = () => {
+    if (mutationBlocked.value) return
     isFormVisible.value = false
     selectedAddress.value = null
 }
 
 const handleSaved = async (message: string) => {
     successMessage.value = message
+    formSubmitting.value = false
     closeForm()
-
+    refreshNeeded.value = true
     await loadAddresses()
 }
 
 const handleSetDefault = async (address: UserAddress) => {
-    if (address.is_default || processingAddressId.value !== null) {
+    if (address.is_default || mutationBlocked.value) {
         return
     }
 
@@ -63,17 +79,20 @@ const handleSetDefault = async (address: UserAddress) => {
 
     try {
         const response = await setDefaultAddress(address.id)
+        if (disposed) return
         successMessage.value = response.message
+        refreshNeeded.value = true
         await loadAddresses()
     } catch {
+        if (disposed) return
         errorMessage.value = '預設地址設定失敗，請稍後再試'
     } finally {
-        processingAddressId.value = null
+        if (!disposed) processingAddressId.value = null
     }
 }
 
 const handleDelete = async (address: UserAddress) => {
-    if (processingAddressId.value !== null) {
+    if (mutationBlocked.value) {
         return
     }
 
@@ -92,17 +111,21 @@ const handleDelete = async (address: UserAddress) => {
     try {
         const response = await deleteAddress(address.id)
 
+        if (disposed) return
         if (selectedAddress.value?.id === address.id) {
-            closeForm()
+            isFormVisible.value = false
+            selectedAddress.value = null
         }
 
         successMessage.value = response.message
+        refreshNeeded.value = true
 
         await loadAddresses()
     } catch {
+        if (disposed) return
         errorMessage.value = '地址刪除失敗，請稍後再試'
     } finally {
-        processingAddressId.value = null
+        if (!disposed) processingAddressId.value = null
     }
 }
 
@@ -114,7 +137,7 @@ onMounted(() => { loadAddresses() })
         <div class="d-flex flex-wrap gap-3 justify-content-between align-items-center mb-4">
             <h2 class="h4 mb-0">地址簿</h2>
 
-            <button v-if="!isFormVisible" type="button" class="btn btn-dark" @click="openCreateForm">
+            <button v-if="!isFormVisible" type="button" class="btn btn-dark" :disabled="mutationBlocked" @click="openCreateForm">
                 新增地址
             </button>
         </div>
@@ -123,7 +146,7 @@ onMounted(() => { loadAddresses() })
             {{ successMessage }}
         </div>
 
-        <UserAddressForm v-if="isFormVisible" :address="selectedAddress" @saved="handleSaved" @cancel="closeForm" />
+        <UserAddressForm v-if="isFormVisible" :address="selectedAddress" :disabled="refreshNeeded || isLoading || processingAddressId !== null" @submitting-change="formSubmitting = $event" @saved="handleSaved" @cancel="closeForm" />
 
         <div v-if="isLoading" class="text-center py-5">
             <div class="spinner-border text-dark" role="status" aria-label="地址資料載入中"></div>
@@ -157,18 +180,18 @@ onMounted(() => { loadAddresses() })
                                     <div class="d-flex flex-wrap gap-2 hf-address-actions">
                                         <button v-if="!address.is_default" type="button"
                                             class="btn btn-outline-secondary btn-sm"
-                                            :disabled="processingAddressId === address.id"
+                                            :disabled="mutationBlocked"
                                             @click="handleSetDefault(address)">
                                             {{ processingAddressId === address.id ? '設定中...' : '設為預設' }}
                                         </button>
 
                                         <button type="button" class="btn btn-outline-dark btn-sm"
-                                            @click="openEditForm(address)">
+                                            :disabled="mutationBlocked" @click="openEditForm(address)">
                                             編輯
                                         </button>
 
                                         <button type="button" class="btn btn-outline-danger btn-sm"
-                                            :disabled="processingAddressId !== null" @click="handleDelete(address)">
+                                            :disabled="mutationBlocked" @click="handleDelete(address)">
                                             {{ processingAddressId === address.id ? '處理中...' : '刪除' }}
                                         </button>
                                     </div>

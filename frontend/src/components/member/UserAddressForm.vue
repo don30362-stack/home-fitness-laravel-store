@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from 'axios';
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 
 import { storeAddress, updateAddress } from '@/services/addressService';
 import { getCities, getDistricts } from '@/services/locationService';
@@ -12,17 +12,22 @@ import type { City, District } from '@/types/location';
 const props = withDefaults(
     defineProps<{
         address?: UserAddress | null
+        disabled?: boolean
     }>(),
     {
-        address: null
+        address: null,
+        disabled: false
     }
 )
 
 const emit = defineEmits<{
     saved: [meaasge: string]
     cancel: []
+    submittingChange: [value: boolean]
 }>()
 
+let disposed = false, districtSequence = 0, contextSequence = 0
+onBeforeUnmount(() => { disposed = true; ++districtSequence; ++contextSequence })
 const cities = ref<City[]>([])
 const districts = ref<District[]>([])
 const selectedCityId = ref<number | null>(null)
@@ -72,29 +77,34 @@ const loadCities = async () => {
 
     try {
         const response = await getCities()
-        cities.value = response.data
+        if (!disposed) cities.value = response.data
     } catch {
-        errorMessage.value = '縣市資料載入失敗'
+        if (!disposed) errorMessage.value = '縣市資料載入失敗'
     } finally {
-        isCitiesLoading.value = false
+        if (!disposed) isCitiesLoading.value = false
     }
 }
 
 const loadDistricts = async (cityId: number) => {
+    const current = ++districtSequence
+    const valid = () => !disposed && current === districtSequence && cityId === selectedCityId.value
     isDistrictsLoading.value = true
 
     try {
         const response = await getDistricts(cityId)
-        districts.value = response.data
+        if (valid()) districts.value = response.data
     } catch {
+        if (!valid()) return
         districts.value = []
         errorMessage.value = '行政區資料載入失敗'
     } finally {
-        isDistrictsLoading.value = false
+        if (valid()) isDistrictsLoading.value = false
     }
 }
 
 const handleCityChange = async () => {
+    ++districtSequence
+    isDistrictsLoading.value = false
     form.district_id = 0
     districts.value = []
     errorMessage.value = ''
@@ -107,19 +117,21 @@ const handleCityChange = async () => {
 }
 
 const handleSubmit = async () => {
-    if (isSubmitting.value) {
+    if (isSubmitting.value || props.disabled) {
         return
     }
 
     errorMessage.value = ''
     fieldErrors.value = {}
 
-    if (form.district_id === 0) {
+    if (selectedDistrict.value === null) {
         fieldErrors.value.district_id = ['請選擇行政區']
         return
     }
 
+    const current = contextSequence
     isSubmitting.value = true
+    emit('submittingChange', true)
 
     const payload = {
         district_id: form.district_id,
@@ -135,8 +147,9 @@ const handleSubmit = async () => {
                 await updateAddress(props.address.id, payload) :
                 await storeAddress({ ...payload, 'is_default': form.is_default })
 
-        emit('saved', response.message)
+        if (!disposed && current === contextSequence) emit('saved', response.message)
     } catch (error) {
+        if (disposed || current !== contextSequence) return
         if (axios.isAxiosError<ApiErrorResponse>(error)) {
             if (error.response?.status === 422) {
                 fieldErrors.value = error.response.data.errors ?? {}
@@ -147,13 +160,18 @@ const handleSubmit = async () => {
             errorMessage.value = '地址儲存失敗，請稍後再試'
         }
     } finally {
-        isSubmitting.value = false
+        if (!disposed && current === contextSequence) {
+            isSubmitting.value = false
+            emit('submittingChange', false)
+        }
     }
 }
 
 watch(
     () => props.address,
     async (address) => {
+        const current = ++contextSequence
+        ++districtSequence
         resetForm()
 
         if (!address) {
@@ -167,9 +185,10 @@ watch(
         form.recipient_phone = address.recipient_phone
         form.address = address.address
 
+        const districtRequest = districtSequence + 1
         await loadDistricts(address.district.city.id)
 
-        form.district_id = address.district.id
+        if (!disposed && current === contextSequence && districtRequest === districtSequence && selectedCityId.value === address.district.city.id && districts.value.some(d => d.id === address.district.id)) form.district_id = address.district.id
     },
     {
         immediate: true
@@ -193,6 +212,7 @@ onMounted(() => {
             </div>
 
             <form @submit.prevent="handleSubmit">
+                <fieldset :disabled="disabled || isSubmitting">
                 <div class="row g-3">
                     <div class="col-md-6"></div>
 
@@ -202,9 +222,9 @@ onMounted(() => {
                         </label>
 
                         <input id="addressLabel" v-model="form.label" type="text" class="form-control"
-                            :class="{ 'is-invalid': fieldErrors.label }" maxlength="30" placeholder="例如：住家、公司" required>
+                            :class="{ 'is-invalid': fieldErrors.label }" :aria-invalid="!!fieldErrors.label" :aria-describedby="fieldErrors.label ? 'address-error-label' : undefined" maxlength="30" placeholder="例如：住家、公司" required>
 
-                        <div v-if="fieldErrors.label" class="invalid-feedback">
+                        <div v-if="fieldErrors.label" id="address-error-label" class="invalid-feedback">
                             {{ fieldErrors.label[0] }}
                         </div>
                     </div>
@@ -215,10 +235,10 @@ onMounted(() => {
                         </label>
 
                         <input id="recipientName" v-model="form.recipient_name" type="text" class="form-control"
-                            :class="{ 'is-invalid': fieldErrors.recipient_name }" maxlength="50" autocomplete="name"
+                            :class="{ 'is-invalid': fieldErrors.recipient_name }" :aria-invalid="!!fieldErrors.recipient_name" :aria-describedby="fieldErrors.recipient_name ? 'address-error-recipient_name' : undefined" maxlength="50" autocomplete="name"
                             required>
 
-                        <div v-if="fieldErrors.recipient_name" class="invalid-feedback">
+                        <div v-if="fieldErrors.recipient_name" id="address-error-recipient_name" class="invalid-feedback">
                             {{ fieldErrors.recipient_name[0] }}
                         </div>
                     </div>
@@ -229,10 +249,10 @@ onMounted(() => {
                         </label>
 
                         <input id="recipientPhone" v-model="form.recipient_phone" type="text" class="form-control"
-                            :class="{ 'is-invalid': fieldErrors.recipient_phone }" maxlength="50" pattern="09[0-9]{8}"
+                            :class="{ 'is-invalid': fieldErrors.recipient_phone }" :aria-invalid="!!fieldErrors.recipient_phone" :aria-describedby="fieldErrors.recipient_phone ? 'address-error-recipient_phone' : undefined" maxlength="50" pattern="09[0-9]{8}"
                             inputmode="numeric" autocomplete="tel" required>
 
-                        <div v-if="fieldErrors.recipient_phone" class="invalid-feedback">
+                        <div v-if="fieldErrors.recipient_phone" id="address-error-recipient_phone" class="invalid-feedback">
                             {{ fieldErrors.recipient_phone[0] }}
                         </div>
                     </div>
@@ -260,7 +280,7 @@ onMounted(() => {
                         </label>
 
                         <select id="district" v-model="form.district_id" class="form-select"
-                            :class="{ 'is-invalid': fieldErrors.district_id }"
+                            :class="{ 'is-invalid': fieldErrors.district_id }" :aria-invalid="!!fieldErrors.district_id" :aria-describedby="fieldErrors.district_id ? 'address-error-district_id' : undefined"
                             :disabled="selectedCityId === null || isDistrictsLoading" required>
                             <option value="0">
                                 請選擇行政區
@@ -271,7 +291,7 @@ onMounted(() => {
                             </option>
                         </select>
 
-                        <div v-if="fieldErrors.district_id" class="invalid-feedback">
+                        <div v-if="fieldErrors.district_id" id="address-error-district_id" class="invalid-feedback">
                             {{ fieldErrors.district_id[0] }}
                         </div>
                     </div>
@@ -291,10 +311,10 @@ onMounted(() => {
                         </label>
 
                         <input id="detailAddress" v-model="form.address" type="text" class="form-control"
-                            :class="{ 'is-invalid': fieldErrors.address }" maxlength="255" autocomplete="street-address"
+                            :class="{ 'is-invalid': fieldErrors.address }" :aria-invalid="!!fieldErrors.address" :aria-describedby="fieldErrors.address ? 'address-error-address' : undefined" maxlength="255" autocomplete="street-address"
                             placeholder="路、街、巷、弄、號、樓" required>
 
-                        <div v-if="fieldErrors.address" class="invalid-feedback">
+                        <div v-if="fieldErrors.address" id="address-error-address" class="invalid-feedback">
                             {{ fieldErrors.address[0] }}
                         </div>
                     </div>
@@ -315,11 +335,11 @@ onMounted(() => {
                         {{ isSubmitting ? '儲存中...' : '儲存地址' }}
                     </button>
 
-                    <button type="button" class="btn btn-outline-secondary" :disabled="isSubmitting"
-                        @click="emit('cancel')">
+                    <button type="button" class="btn btn-outline-secondary" :disabled="isSubmitting" @click="emit('cancel')">
                         取消
                     </button>
                 </div>
+                </fieldset>
             </form>
         </div>
     </div>

@@ -83,7 +83,7 @@ const newer = { ...admin, id: 2, email: 'new@example.test' }
 const user = { id: 9, name: '會員', email: 'member@example.test', phone: '0912345678', status: 'active' }
 const payload = { email: admin.email, password: 'test-only' }
 const key = 'home-fitness-store-guest-cart'
-const guest = JSON.stringify([{ key: '99:none', product_id: 99, product_variant_id: null, quantity: 1 }])
+const guest = JSON.stringify([{ key: '99:none', product_id: 99, product_variant_id: null, quantity: 1, product: { id: 99, name: 'Fixture', product_code: 'PRD-FIXTURE', price: '10.00', status: 'active', primary_image: null }, variant: null, unit_price: '10.00', subtotal: '10.00', available_stock: 10, is_available: true, unavailable_reason: null }])
 const categoryOptions = [{ id: 1, name: '器材', children: [{ id: 2, name: '啞鈴' }] }]
 const adminCategoryTree = [{ id: 1, name: '管理根分類', status: 'inactive', sort_order: 2, children_count: 2,
   created_at: '2026-10-05T00:00:00Z', updated_at: '2026-10-05T00:00:00Z', children: [

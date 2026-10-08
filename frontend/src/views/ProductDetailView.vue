@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { isAxiosError } from 'axios'
 
@@ -21,6 +21,28 @@ const selectedVariant = ref<ProductVariant | null>(null)
 const isLoading = ref(false)
 const errorMessage = ref('')
 const quantity = ref(1)
+const notFound = ref(false)
+const relatedLoading = ref(false)
+const relatedError = ref('')
+let sequence = 0, relatedSequence = 0
+let disposed = false
+onBeforeUnmount(() => { disposed = true; ++sequence; ++relatedSequence })
+const fetchRelated = async () => {
+    if (!product.value || relatedLoading.value || disposed) return
+    const id = product.value.id, current = ++relatedSequence, main = sequence
+    const valid = () => !disposed && main === sequence && current === relatedSequence
+    relatedLoading.value = true
+    relatedError.value = ''
+    try {
+        const rows = await getRelatedProducts(id)
+        if (valid()) relatedProducts.value = rows
+    } catch {
+        if (valid()) relatedError.value = '相關商品載入失敗'
+    } finally {
+        if (valid()) relatedLoading.value = false
+    }
+}
+const retryProduct = () => { if (!isLoading.value) void fetchProduct() }
 
 const isAddingToCart = ref(false)
 const cartSuccessMessage = ref('')
@@ -76,6 +98,12 @@ const addToCartButtonText = computed(() => {
 })
 
 const fetchProduct = async () => {
+    const current = ++sequence
+    ++relatedSequence
+    const valid = () => !disposed && current === sequence
+    relatedLoading.value = false
+    relatedError.value = ''
+    notFound.value = false
     isLoading.value = true
     errorMessage.value = ''
     product.value = null
@@ -100,18 +128,21 @@ const fetchProduct = async () => {
             return
         }
 
-        product.value = await getProductById(productId)
-        relatedProducts.value = await getRelatedProducts(productId)
+        const result = await getProductById(productId)
+        if (!valid()) return
+        product.value = result
+        void fetchRelated()
     } catch (error) {
-        console.error(error)
+        if (!valid()) return
 
         if (isAxiosError<ApiErrorResponse>(error) && error.response?.status === 404) {
+            notFound.value = true
             errorMessage.value = error.response.data?.message || '找不到此商品'
         } else {
             errorMessage.value = '商品資料載入失敗'
         }
     } finally {
-        isLoading.value = false
+        if (valid()) isLoading.value = false
     }
 }
 
@@ -223,9 +254,7 @@ watch(
             商品載入中...
         </p>
 
-        <p v-else-if="errorMessage" class="text-danger">
-            {{ errorMessage }}
-        </p>
+        <div v-else-if="errorMessage" role="alert" class="text-danger"><p>{{ errorMessage }}</p><button v-if="!notFound" type="button" class="btn btn-outline-dark" :disabled="isLoading" @click="retryProduct">重新載入商品</button></div>
 
         <div v-else-if="product">
             <div class="product-detail-grid">
@@ -337,8 +366,10 @@ watch(
                 </dl>
             </section>
 
-            <section v-if="relatedProducts.length > 0" class="mt-5 pt-4 border-top">
+            <section v-if="relatedLoading || relatedError || relatedProducts.length > 0" class="mt-5 pt-4 border-top">
                 <h2 class="h4 fw-bold mb-4">相關商品</h2>
+                <p v-if="relatedLoading" role="status">相關商品載入中...</p>
+                <div v-if="relatedError" role="alert"><p>{{ relatedError }}</p><button type="button" class="btn btn-outline-dark" :disabled="relatedLoading" @click="fetchRelated">重新載入相關商品</button></div>
 
                 <div class="row g-4">
                     <div v-for="relatedProduct in relatedProducts" :key="relatedProduct.id"

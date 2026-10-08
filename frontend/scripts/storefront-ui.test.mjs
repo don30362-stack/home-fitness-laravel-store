@@ -82,7 +82,7 @@ test('Product query continues to be server-side and preserves search/category/pr
   assert.equal(req.params.min_price, 100); assert.equal(req.params.max_price, 500); assert.equal(req.params.sort, 'price_asc'); assert.equal(req.params.page, 2)
   assert.ok(text(v.root).includes('商品')); v.app.unmount()
 })
-test('Pagination visual update preserves all pages and original current/boundary guards', async () => {
+test('Pagination short window preserves four pages and current/boundary guards', async () => {
   const changes = []; const root = node('root'); const app = renderer.createApp({ render: () => h(Pagination, { currentPage: 2, lastPage: 4, onChangePage: p => changes.push(p) }) }); app.mount(root)
   const buttons = all(root, e => e.type === 'button')
   assert.deepEqual(buttons.map(e => text(e).trim()), ['上一頁', '1', '2', '3', '4', '下一頁'])

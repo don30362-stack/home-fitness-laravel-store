@@ -28,7 +28,7 @@ after(async () => { console.error = originalError; await server.close() })
 const user = { id: 1, name: '測試會員', email: 'c06@example.test', phone: '0912345678', status: 'active' }
 const cart = { items: [], item_count: 0, has_unavailable_items: false }
 const guestKey = 'home-fitness-store-guest-cart'
-const guestJson = JSON.stringify([{ key: 'preserved-guest', product_id: 99, quantity: 1 }])
+const guestJson = JSON.stringify([{ key: '99:none', product_id: 99, product_variant_id: null, quantity: 1, product: { id: 99, name: 'Fixture', product_code: 'PRD-FIXTURE', price: '10.00', status: 'active', primary_image: null }, variant: null, unit_price: '10.00', subtotal: '10.00', available_stock: 10, is_available: true, unavailable_reason: null }])
 let auth, carts, pinia, notifications, calls
 const response = (config, data, status = 200) => ({ config, data, status, statusText: '', headers: {} })
 const reject = (config, status, code) => Promise.reject(new axios.AxiosError(

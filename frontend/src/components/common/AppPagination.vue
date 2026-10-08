@@ -12,11 +12,22 @@ const emit = defineEmits<{
 }>()
 
 const pages = computed(() => {
-  return Array.from({ length: props.lastPage }, (_, index) => index + 1)
+  const last = Math.max(1, Math.floor(props.lastPage))
+  const current = Math.min(last, Math.max(1, Math.floor(props.currentPage)))
+  const selected = [...new Set([1, current - 1, current, current + 1, last])]
+    .filter(page => page >= 1 && page <= last).sort((a, b) => a - b)
+  const result: (number | string)[] = []
+  for (const page of selected) {
+    const previous = result[result.length - 1]
+    if (typeof previous === 'number' && page - previous === 2) result.push(previous + 1)
+    else if (typeof previous === 'number' && page - previous > 2) result.push(`gap-${page}`)
+    result.push(page)
+  }
+  return result
 })
 
 const changePage = (page: number) => {
-  if (page < 1 || page > props.lastPage || page === props.currentPage) {
+  if (!Number.isInteger(page) || page < 1 || page > props.lastPage || page === props.currentPage) {
     return
   }
 
@@ -44,7 +55,8 @@ const changePage = (page: number) => {
         class="page-item"
         :class="{ active: page === currentPage }"
       >
-        <button class="page-link" type="button" @click="changePage(page)">
+        <span v-if="typeof page !== 'number'" class="page-link" aria-hidden="true">…</span>
+        <button v-else class="page-link" type="button" :aria-current="page === currentPage ? 'page' : undefined" @click="changePage(page)">
           {{ page }}
         </button>
       </li>
@@ -64,7 +76,7 @@ const changePage = (page: number) => {
 </template>
 
 <style scoped>
-/* Page selection logic is unchanged; wrap long pagination locally until Step2's window. */
+/* Keep the finite window contained on narrow screens. */
 .pagination { flex-wrap: wrap; gap: .4rem; }
 .page-link { min-width: 44px; min-height: 44px; display: grid; place-items: center; border-radius: .25rem !important; }
 .page-item + .page-item .page-link { margin-left: 0; }

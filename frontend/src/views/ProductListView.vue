@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 
@@ -38,7 +38,13 @@ const hasQueryConditions = computed(() => {
   )
 })
 
+let sequence = 0
+let disposed = false
+onBeforeUnmount(() => { disposed = true; ++sequence })
+const retryProducts = () => { if (!isLoading.value) void fetchProducts() }
 const fetchProducts = async () => {
+  const current = ++sequence
+  const valid = () => !disposed && current === sequence
   isLoading.value = true
   errorMessage.value = ''
 
@@ -110,6 +116,7 @@ const fetchProducts = async () => {
       page: route.query.page != undefined ? page : undefined,
     })
 
+    if (!valid()) return
     if (page > response.meta.last_page) {
       const query = { ...route.query }
 
@@ -129,7 +136,7 @@ const fetchProducts = async () => {
     products.value = response.data
     pagination.value = response.meta
   } catch (error) {
-    console.error(error)
+    if (!valid()) return
 
     if (axios.isAxiosError<ApiErrorResponse>(error) && error.response?.status === 404) {
       errorMessage.value = error.response.data?.message || '找不到此商品分類'
@@ -137,7 +144,7 @@ const fetchProducts = async () => {
       errorMessage.value = '商品載入失敗'
     }
   } finally {
-    isLoading.value = false
+    if (valid()) isLoading.value = false
   }
 }
 
@@ -297,7 +304,7 @@ watch(
           <div class="input-group"><input v-model="searchKeyword" type="search" class="form-control" placeholder="搜尋商品名稱" aria-label="搜尋商品名稱" /><button class="btn btn-dark" type="submit">搜尋</button></div>
         </form>
         <p v-if="isLoading">商品載入中...</p>
-        <p v-else-if="errorMessage" class="text-danger">{{ errorMessage }}</p>
+        <div v-else-if="errorMessage" role="alert" class="text-danger"><p>{{ errorMessage }}</p><button type="button" class="btn btn-outline-dark" :disabled="isLoading" @click="retryProducts">重新載入商品</button></div>
         <div v-else-if="products.length === 0" class="hf-empty-state"><p class="text-muted mb-0">{{ hasQueryConditions ? '找不到符合條件的商品。' : '目前沒有商品。' }}</p></div>
         <template v-else>
           <p class="small text-muted mb-4">共 {{ pagination.total }} 項商品 · 第 {{ pagination.current_page }} 頁</p>
