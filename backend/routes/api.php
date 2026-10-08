@@ -52,11 +52,11 @@ Route::get('/cities', [CityController::class, 'index']);
 Route::get('/cities/{cityId}/districts', [CityController::class, 'districts'])
     ->whereNumber('cityId');
 
-Route::post('/register', [AuthController::class, 'register']);
-Route::post('/login', [AuthController::class, 'login']);
+Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:member-register');
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:member-login');
 
 Route::prefix('admin')->group(function () {
-    Route::post('/login', [AdminAuthController::class, 'login']);
+    Route::post('/login', [AdminAuthController::class, 'login'])->middleware('throttle:admin-login');
 
     Route::middleware('auth:admin')->group(function () {
         Route::post('/logout', [AdminAuthController::class, 'logout']);

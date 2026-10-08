@@ -32,6 +32,8 @@ const submit = async () => {
         loginError.value = '管理員帳號或密碼錯誤'
       } else if (status === 403 && data?.code === 'ADMIN_ACCOUNT_DISABLED') {
         loginError.value = data.message
+      } else if (status === 429) {
+        loginError.value = data?.message ?? '嘗試次數過多，請稍後再試。'
       } else if (status === 419) {
         loginError.value = '登入狀態或 CSRF 發生問題，請重試'
       } else {

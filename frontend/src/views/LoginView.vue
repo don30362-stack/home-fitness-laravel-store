@@ -73,6 +73,8 @@ const handleLogin = async () => {
       const firstFieldError = Object.values(responseData?.errors ?? {})[0]?.[0]
 
       errorMessage.value = firstFieldError ?? '請檢查登入資料'
+    } else if (status === 429) {
+      errorMessage.value = responseData?.message ?? '嘗試次數過多，請稍後再試。'
     } else if (status === 401 || status === 403) {
       errorMessage.value = responseData?.message ?? '登入失敗，請稍後再試'
     } else {
