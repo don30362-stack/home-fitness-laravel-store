@@ -25,6 +25,7 @@ const logout = async () => {
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
       <div class="admin-identity">
         <div class="fw-bold">{{ auth.currentAdmin?.name }}</div>
+        <p v-if="auth.isReadOnlyDemo" class="small mb-0" role="status">唯讀Demo｜資料僅供展示，不能新增、修改或刪除。</p>
         <div class="small text-muted">{{ auth.currentAdmin?.email }}</div>
       </div>
       <button type="button" class="btn btn-outline-secondary" :disabled="submitting" @click="logout">{{ submitting ? '登出中…' : '登出' }}</button>

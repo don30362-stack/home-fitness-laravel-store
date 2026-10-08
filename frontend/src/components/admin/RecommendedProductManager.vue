@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useAdminAuthStore } from '@/stores/adminAuth'
+const demoAuth = useAdminAuthStore()
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import axios from 'axios'
 import { getAdminRecommendedProducts, createAdminRecommendedProduct, deleteAdminRecommendedProduct, reorderAdminRecommendedProducts } from '@/services/adminHomeContentService'
@@ -49,8 +51,8 @@ const loadProducts = async (targetPage = page.value) => {
     selectorError.value = describe(cause)
   } finally { if (!disposed && current === selectorSequence) selectorLoading.value = false }
 }
-const openSelector = () => { if (!blocked.value) { selectorOpen.value = true; return loadProducts() } }
-const mutate = async (operation: () => Promise<{ message: string }>, staleOnValidation = false) => {
+const openSelector = () => { if (demoAuth.isReadOnlyDemo) return; if (!blocked.value) { selectorOpen.value = true; return loadProducts() } }
+const mutate = async (operation: () => Promise<{ message: string }>, staleOnValidation = false) => { if (demoAuth.isReadOnlyDemo) return;
   if (blocked.value) return
   pending.value = true; error.value = ''; errors.value = []; message.value = ''
   const current = ++sequence
@@ -69,13 +71,13 @@ const mutate = async (operation: () => Promise<{ message: string }>, staleOnVali
     }
   } finally { if (!disposed) pending.value = false }
 }
-const add = (product: AdminProductListItem) => {
+const add = (product: AdminProductListItem) => { if (demoAuth.isReadOnlyDemo) return;
   if (blocked.value || selectorLoading.value || selectorError.value || recommendedIds.value.has(product.id)) return
   return mutate(() => createAdminRecommendedProduct(product.id))
 }
-const askRemove = (row: AdminRecommendedProduct) => { if (!blocked.value) removing.value = row }
+const askRemove = (row: AdminRecommendedProduct) => { if (demoAuth.isReadOnlyDemo) return; if (!blocked.value) removing.value = row }
 const confirmRemove = () => { const row = removing.value; if (row) return mutate(() => deleteAdminRecommendedProduct(row.id)) }
-const move = (index: number, delta: number) => {
+const move = (index: number, delta: number) => { if (demoAuth.isReadOnlyDemo) return;
   if (blocked.value || index + delta < 0 || index + delta >= workingIds.value.length) return
   const ids = [...workingIds.value], [id] = ids.splice(index, 1)
   if (id !== undefined) ids.splice(index + delta, 0, id)
@@ -94,9 +96,9 @@ onBeforeUnmount(() => { disposed = true; sequence++; selectorSequence++ })
     <ul v-if="errors.length" class="alert alert-danger"><li v-for="item in errors" :key="item">{{ item }}</li></ul>
     <p v-if="stale && rows.length" class="text-warning">目前推薦清單為舊資料；重新載入成功前暫停推薦操作。</p>
     <div class="d-flex flex-wrap gap-2 mb-3">
-      <button class="btn btn-primary" :disabled="blocked" @click="openSelector">選擇推薦商品</button>
+      <button v-if="!demoAuth.isReadOnlyDemo" class="btn btn-primary" :disabled="blocked" @click="openSelector">選擇推薦商品</button>
       <button class="btn btn-outline-secondary" :disabled="pending" @click="retry">重新載入推薦商品</button>
-      <button v-if="orderDirty" class="btn btn-outline-primary" :disabled="blocked" @click="saveOrder">儲存推薦排序</button>
+      <button v-if="!demoAuth.isReadOnlyDemo && (orderDirty)" class="btn btn-outline-primary" :disabled="blocked" @click="saveOrder">儲存推薦排序</button>
     </div>
     <div v-if="selectorOpen" class="card card-body mb-3" aria-label="推薦商品選擇器">
       <form class="d-flex flex-wrap gap-2 mb-2" @submit.prevent="loadProducts(1)">
@@ -109,21 +111,21 @@ onBeforeUnmount(() => { disposed = true; sequence++; selectorSequence++ })
         <p v-if="!products.length">沒有符合條件的商品。</p>
         <div v-for="product in products" :key="product.id" class="border rounded p-2 mb-2 selector-row">
           <p>{{ product.product_code }} · {{ product.name }} · {{ product.status }} · {{ product.category?.name || '無分類' }} · {{ product.price }}</p>
-          <button class="btn btn-outline-primary" :disabled="blocked || recommendedIds.has(product.id)" @click="add(product)">{{ recommendedIds.has(product.id) ? '已推薦' : '加入推薦' }}</button>
+          <button v-if="!demoAuth.isReadOnlyDemo" class="btn btn-outline-primary" :disabled="blocked || recommendedIds.has(product.id)" @click="add(product)">{{ recommendedIds.has(product.id) ? '已推薦' : '加入推薦' }}</button>
         </div>
         <div class="d-flex gap-2 align-items-center"><button class="btn btn-outline-secondary" :disabled="pending || page <= 1" @click="loadProducts(page - 1)">上一頁商品</button><span>第 {{ page }} / {{ lastPage }} 頁</span><button class="btn btn-outline-secondary" :disabled="pending || page >= lastPage" @click="loadProducts(page + 1)">下一頁商品</button></div>
       </template>
     </div>
     <div v-if="removing" role="dialog" aria-label="移除推薦確認" class="card card-body mb-3">
       <p>確認移除「{{ removing.product?.name || removing.product_id }}」？只移除首頁推薦設定，不會刪除商品、不會修改商品上／下架狀態，也不影響歷史訂單。</p>
-      <div class="d-flex gap-2"><button class="btn btn-danger" :disabled="blocked" @click="confirmRemove">確認移除推薦</button><button class="btn btn-secondary" :disabled="pending" @click="!pending && (removing = null)">放棄移除推薦</button></div>
+      <div class="d-flex gap-2"><button v-if="!demoAuth.isReadOnlyDemo" class="btn btn-danger" :disabled="blocked" @click="confirmRemove">確認移除推薦</button><button class="btn btn-secondary" :disabled="pending" @click="!pending && (removing = null)">放棄移除推薦</button></div>
     </div>
     <p v-if="loading">載入推薦商品中…</p><p v-else-if="!error && !rows.length">目前沒有推薦商品。</p>
     <article v-for="(row, index) in ordered" :key="row.id" class="card card-body mb-2 recommendation-row">
       <h3 class="h5">{{ row.product?.name || '商品目前不存在' }}</h3>
       <p>{{ row.product?.product_code }} · {{ row.product?.status }} · {{ row.product?.category?.name || '無分類' }} · 排序值 {{ row.sort_order }}</p>
       <p>{{ row.is_publicly_visible ? '前台顯示中' : '目前不會顯示於前台' }}</p><p v-if="row.unavailable_reason">{{ row.unavailable_reason }}</p>
-      <div class="d-flex flex-wrap gap-2"><button class="btn btn-outline-danger" :disabled="blocked" @click="askRemove(row)">移除推薦</button><button class="btn btn-outline-secondary" :disabled="blocked || index === 0" @click="move(index, -1)">推薦上移</button><button class="btn btn-outline-secondary" :disabled="blocked || index === ordered.length - 1" @click="move(index, 1)">推薦下移</button></div>
+      <div class="d-flex flex-wrap gap-2"><button v-if="!demoAuth.isReadOnlyDemo" class="btn btn-outline-danger" :disabled="blocked" @click="askRemove(row)">移除推薦</button><button v-if="!demoAuth.isReadOnlyDemo" class="btn btn-outline-secondary" :disabled="blocked || index === 0" @click="move(index, -1)">推薦上移</button><button v-if="!demoAuth.isReadOnlyDemo" class="btn btn-outline-secondary" :disabled="blocked || index === ordered.length - 1" @click="move(index, 1)">推薦下移</button></div>
     </article>
   </section>
 </template>

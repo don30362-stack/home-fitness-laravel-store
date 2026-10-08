@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useAdminAuthStore } from '@/stores/adminAuth'
+const demoAuth = useAdminAuthStore()
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { getAdminBanners, createAdminBanner, updateAdminBanner, updateAdminBannerStatus, reorderAdminBanners, deleteAdminBanner } from '@/services/adminHomeContentService'
@@ -43,7 +45,7 @@ const load = async (refresh = false) => {
   } finally { if (!disposed && current === sequence) loading.value = false }
 }
 const retry = () => { if (!pending.value) return load(stale.value && !!message.value) }
-const openForm = (banner?: AdminBanner) => {
+const openForm = (banner?: AdminBanner) => { if (demoAuth.isReadOnlyDemo) return;
   if (blocked.value) return
   releasePreview(); fieldErrors.value = []; error.value = ''; confirmation.value = null
   editingId.value = banner?.id ?? null
@@ -61,7 +63,7 @@ const chooseFile = (event: Event) => {
   }
   draft.image = file; preview.value = URL.createObjectURL(file)
 }
-const mutate = async (operation: () => Promise<{ message: string }>, staleOnValidation = false) => {
+const mutate = async (operation: () => Promise<{ message: string }>, staleOnValidation = false) => { if (demoAuth.isReadOnlyDemo) return;
   if (blocked.value) return
   pending.value = true; message.value = ''; error.value = ''; fieldErrors.value = []
   const current = ++sequence
@@ -87,7 +89,7 @@ const submit = () => {
   const id = editingId.value, image = draft.image
   return mutate(() => id === null ? createAdminBanner({ ...fields, image: image!, status: draft.status }) : updateAdminBanner(id, { ...fields, ...(image ? { image } : {}) }))
 }
-const ask = (kind: 'status' | 'delete', banner: AdminBanner) => {
+const ask = (kind: 'status' | 'delete', banner: AdminBanner) => { if (demoAuth.isReadOnlyDemo) return;
   if (blocked.value) return
   resetForm(); error.value = ''; fieldErrors.value = []; confirmation.value = { kind, banner }
 }
@@ -96,7 +98,7 @@ const confirm = () => {
   if (!target || blocked.value) return
   return mutate(() => target.kind === 'delete' ? deleteAdminBanner(target.banner.id) : updateAdminBannerStatus(target.banner.id, target.banner.status === 'active' ? 'inactive' : 'active'))
 }
-const move = (index: number, delta: number) => {
+const move = (index: number, delta: number) => { if (demoAuth.isReadOnlyDemo) return;
   if (blocked.value || index + delta < 0 || index + delta >= workingIds.value.length) return
   const ids = [...workingIds.value], [id] = ids.splice(index, 1)
   if (id !== undefined) ids.splice(index + delta, 0, id)
@@ -115,9 +117,9 @@ onBeforeUnmount(() => { disposed = true; sequence++; releasePreview() })
     <ul v-if="fieldErrors.length" class="alert alert-danger"><li v-for="item in fieldErrors" :key="item">{{ item }}</li></ul>
     <p v-if="stale && banners.length" class="text-warning">目前顯示舊資料；重新載入成功前暫停操作。</p>
     <div class="d-flex flex-wrap gap-2 mb-3">
-      <button class="btn btn-primary" :disabled="blocked" @click="openForm()">新增輪播</button>
+      <button v-if="!demoAuth.isReadOnlyDemo" class="btn btn-primary" :disabled="blocked" @click="openForm()">新增輪播</button>
       <button class="btn btn-outline-secondary" :disabled="pending" @click="retry">重新載入輪播</button>
-      <button v-if="orderDirty" class="btn btn-outline-primary" :disabled="blocked" @click="saveOrder">儲存排序</button>
+      <button v-if="!demoAuth.isReadOnlyDemo && (orderDirty)" class="btn btn-outline-primary" :disabled="blocked" @click="saveOrder">儲存排序</button>
     </div>
     <form v-if="formOpen" class="card card-body mb-3" @submit.prevent="submit">
       <h3 class="h5">{{ editingId === null ? '新增輪播' : '編輯輪播' }}</h3>
@@ -147,11 +149,11 @@ onBeforeUnmount(() => { disposed = true; sequence++; releasePreview() })
           <p>{{ banner.button_text }} <span>{{ banner.link_url }}</span></p>
           <p>{{ banner.status === 'active' ? '上架' : '下架' }} · 排序值 {{ banner.sort_order }}</p>
           <div class="d-flex flex-wrap gap-2">
-            <button class="btn btn-outline-primary" :disabled="blocked" @click="openForm(banner)">編輯</button>
-            <button class="btn btn-outline-secondary" :disabled="blocked" @click="ask('status', banner)">{{ banner.status === 'active' ? '下架' : '上架' }}</button>
-            <button class="btn btn-outline-danger" :disabled="blocked" @click="ask('delete', banner)">刪除</button>
-            <button class="btn btn-outline-secondary" :disabled="blocked || index === 0" @click="move(index, -1)">上移</button>
-            <button class="btn btn-outline-secondary" :disabled="blocked || index === ordered.length - 1" @click="move(index, 1)">下移</button>
+            <button v-if="!demoAuth.isReadOnlyDemo" class="btn btn-outline-primary" :disabled="blocked" @click="openForm(banner)">編輯</button>
+            <button v-if="!demoAuth.isReadOnlyDemo" class="btn btn-outline-secondary" :disabled="blocked" @click="ask('status', banner)">{{ banner.status === 'active' ? '下架' : '上架' }}</button>
+            <button v-if="!demoAuth.isReadOnlyDemo" class="btn btn-outline-danger" :disabled="blocked" @click="ask('delete', banner)">刪除</button>
+            <button v-if="!demoAuth.isReadOnlyDemo" class="btn btn-outline-secondary" :disabled="blocked || index === 0" @click="move(index, -1)">上移</button>
+            <button v-if="!demoAuth.isReadOnlyDemo" class="btn btn-outline-secondary" :disabled="blocked || index === ordered.length - 1" @click="move(index, 1)">下移</button>
           </div>
         </div>
       </article>

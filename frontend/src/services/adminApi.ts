@@ -7,7 +7,7 @@ import {
 } from './adminSessionState'
 
 type AdminRequestConfig = InternalAxiosRequestConfig & { adminGeneration?: number; adminPermissionContext?: string }
-const isAdminLogin = (url = '') => /(?:^|\/)admin\/login\/?(?:\?|$)/.test(url)
+const isAdminLogin = (url = '') => /(?:^|\/)admin\/(?:login|demo)\/?(?:\?|$)/.test(url)
 const isAdminRequest = (url = '') => /(?:^|\/)admin(?:\/|\?|$)/.test(url)
 
 const adminApi = axios.create({

@@ -6,7 +6,9 @@ import { useAdminAuthStore } from '@/stores/adminAuth'
 
 const open = ref(false)
 const auth = useAdminAuthStore()
-const links = computed(() => adminModules.filter(module => !module.permission || auth.hasPermission(module.permission)))
+const links = computed(() => adminModules.filter(module => auth.isReadOnlyDemo
+  ? ['dashboard', 'products', 'categories', 'inventory', 'home-content'].includes(module.path)
+  : !module.permission || auth.hasPermission(module.permission)))
 </script>
 
 <template>

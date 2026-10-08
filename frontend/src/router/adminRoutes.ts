@@ -19,6 +19,8 @@ import { setAdminNavigationCallbacks } from '@/services/adminSessionNavigation'
 import { adminModules } from './adminModules'
 import { ADMIN_PAGE_METADATA } from './pageMetadata'
 export { adminModules } from './adminModules'
+export const demoRouteNames = new Set(['admin-dashboard', 'admin-products', 'admin-product-detail',
+  'admin-categories', 'admin-inventory', 'admin-home-content', 'admin-forbidden', 'admin-not-found'])
 const AdminManagementView = () => import('@/views/admin/AdminManagementView.vue')
 const AdminForbiddenView = () => import('@/views/admin/AdminForbiddenView.vue')
 import type { AdminPermissionCode } from '@/types/adminAuth'
@@ -69,6 +71,7 @@ export const adminGuard: NavigationGuard = async (to) => {
   if (auth.restoreError) return true
   if (to.name === 'admin-login') return auth.isAdminAuthenticated ? '/admin/dashboard' : true
   if (!auth.isAdminAuthenticated) return { name: 'admin-login', query: { redirect: to.fullPath } }
+  if (auth.isReadOnlyDemo) return demoRouteNames.has(String(to.name)) ? true : { name: 'admin-forbidden' }
   if (to.meta.adminPermission && !auth.hasPermission(to.meta.adminPermission)) return { name: 'admin-forbidden' }
   return true
 }

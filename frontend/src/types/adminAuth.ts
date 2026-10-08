@@ -10,6 +10,7 @@ export type AdminPermissionCode =
   | 'admin_manage'
 
 export interface Admin {
+  is_demo?: boolean
   id: number
   name: string
   email: string

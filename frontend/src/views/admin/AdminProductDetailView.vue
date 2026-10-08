@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useAdminAuthStore } from '@/stores/adminAuth'
+const demoAuth = useAdminAuthStore()
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
@@ -46,7 +48,7 @@ const load = async () => {
     if (current === requestId) isLoading.value = false
   }
 }
-const mutate = async (status?: ProductStatus) => {
+const mutate = async (status?: ProductStatus) => { if (demoAuth.isReadOnlyDemo) return;
   if (submitting.value || !product.value || (status === undefined && !confirmDelete.value)) return
   const current = requestId,
     id = String(product.value.id)
@@ -91,7 +93,7 @@ onBeforeUnmount(() => {
     </div>
     <template v-else-if="product">
       <h2 class="h4">{{ product.name }}</h2>
-      <RouterLink
+      <RouterLink v-if="!demoAuth.isReadOnlyDemo"
         class="btn btn-outline-primary mb-3"
         :to="{ name: 'admin-product-edit', params: { id: product.id }, query: route.query }"
         >編輯商品</RouterLink
@@ -99,7 +101,7 @@ onBeforeUnmount(() => {
       <p v-if="mutationError" class="alert alert-danger" role="alert">{{ mutationError }}</p>
       <p v-if="mutationMessage" class="alert alert-success" role="status">{{ mutationMessage }}</p>
       <div class="d-flex flex-wrap gap-2 mb-3">
-        <button
+        <button v-if="!demoAuth.isReadOnlyDemo"
           v-for="status in ['active', 'inactive', 'disabled'] as const"
           :key="status"
           type="button"
@@ -109,7 +111,7 @@ onBeforeUnmount(() => {
         >
           設為{{ labels[status] }}
         </button>
-        <button
+        <button v-if="!demoAuth.isReadOnlyDemo"
           type="button"
           class="btn btn-outline-danger"
           :disabled="submitting"
@@ -123,10 +125,10 @@ onBeforeUnmount(() => {
         <p>
           確定實體刪除此商品？若沒有歷史訂單但存在會員購物車項目，刪除後這些購物車項目會一併移除。有歷史訂單的商品無法刪除，請改為下架或停用。
         </p>
-        <button type="button" class="btn btn-danger me-2" :disabled="submitting" @click="mutate()">
+        <button v-if="!demoAuth.isReadOnlyDemo" type="button" class="btn btn-danger me-2" :disabled="submitting" @click="mutate()">
           確認刪除
         </button>
-        <button
+        <button v-if="!demoAuth.isReadOnlyDemo"
           type="button"
           class="btn btn-secondary"
           :disabled="submitting"

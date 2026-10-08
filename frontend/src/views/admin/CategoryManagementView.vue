@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useAdminAuthStore } from '@/stores/adminAuth'
+const demoAuth = useAdminAuthStore()
 import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import axios from 'axios'
 import { getAdminCategories, updateAdminCategoryStatus, deleteAdminCategory } from '@/services/adminCategoryService'
@@ -21,7 +23,7 @@ const mutationPending = computed(() => formSubmitting.value || statusSubmitting.
 const statusTarget = ref<{ id: number; name: string; status: 'active' | 'inactive'; role: 'root' | 'child' } | null>(null)
 const statusError = ref('')
 let disposed = false
-const openStatus = (category: AdminCategory | AdminCategoryChild, role: 'root' | 'child') => {
+const openStatus = (category: AdminCategory | AdminCategoryChild, role: 'root' | 'child') => { if (demoAuth.isReadOnlyDemo) return;
   if (mutationPending.value) return
   closeForm()
   deleteTarget.value = null
@@ -29,7 +31,7 @@ const openStatus = (category: AdminCategory | AdminCategoryChild, role: 'root' |
   statusError.value = ''
   statusTarget.value = { id: category.id, name: category.name, status: category.status === 'active' ? 'inactive' : 'active', role }
 }
-const openDelete = (category: AdminCategory | AdminCategoryChild, role: 'root' | 'child') => {
+const openDelete = (category: AdminCategory | AdminCategoryChild, role: 'root' | 'child') => { if (demoAuth.isReadOnlyDemo) return;
   if (mutationPending.value) return
   closeForm()
   statusTarget.value = null
@@ -38,7 +40,7 @@ const openDelete = (category: AdminCategory | AdminCategoryChild, role: 'root' |
   deleteTarget.value = { id: category.id, name: category.name, role }
 }
 const cancelDelete = () => { if (!mutationPending.value) deleteTarget.value = null }
-const submitDelete = async () => {
+const submitDelete = async () => { if (demoAuth.isReadOnlyDemo) return;
   if (mutationPending.value || !deleteTarget.value) return
   const target = { ...deleteTarget.value }
   deleteSubmitting.value = true
@@ -59,7 +61,7 @@ const submitDelete = async () => {
   }
 }
 const cancelStatus = () => { if (!mutationPending.value) statusTarget.value = null }
-const submitStatus = async () => {
+const submitStatus = async () => { if (demoAuth.isReadOnlyDemo) return;
   if (mutationPending.value || !statusTarget.value) return
   const target = { ...statusTarget.value }
   statusSubmitting.value = true
@@ -99,7 +101,7 @@ const loadCategories = async () => {
 }
 
 const statusLabel = (status: string) => status === 'active' ? '啟用' : status === 'inactive' ? '停用' : status
-const openForm = (role: 'root' | 'child', category: AdminCategory | AdminCategoryChild | null = null) => {
+const openForm = (role: 'root' | 'child', category: AdminCategory | AdminCategoryChild | null = null) => { if (demoAuth.isReadOnlyDemo) return;
   if (mutationPending.value) return
   statusTarget.value = null
   deleteTarget.value = null
@@ -126,8 +128,8 @@ onBeforeUnmount(() => { disposed = true; requestSequence++ })
   <section aria-labelledby="category-management-title">
     <h1 id="category-management-title" class="h3 mb-4">商品分類管理</h1>
     <div class="d-flex flex-wrap gap-2 mb-3">
-      <button type="button" class="btn btn-primary" :disabled="mutationPending || loading || !!error" @click="openForm('root')">新增主分類</button>
-      <button type="button" class="btn btn-outline-primary" :disabled="mutationPending || loading || !!error" @click="openForm('child')">新增子分類</button>
+      <button v-if="!demoAuth.isReadOnlyDemo" type="button" class="btn btn-primary" :disabled="mutationPending || loading || !!error" @click="openForm('root')">新增主分類</button>
+      <button v-if="!demoAuth.isReadOnlyDemo" type="button" class="btn btn-outline-primary" :disabled="mutationPending || loading || !!error" @click="openForm('child')">新增子分類</button>
     </div>
     <p v-if="success" role="status" class="alert alert-success">{{ success }}</p>
     <CategoryForm v-if="form" :key="formContext" :context="formContext" :categories="categories"
@@ -165,9 +167,9 @@ onBeforeUnmount(() => { disposed = true; requestSequence++ })
       <article v-for="category in categories" :key="category.id" class="card">
         <div class="card-header">
           <h2 class="h5 mb-2">{{ category.name }}</h2>
-          <button type="button" class="btn btn-sm btn-outline-secondary mb-2" :disabled="mutationPending" @click="openForm('root', category)">編輯主分類</button>
-          <button type="button" class="btn btn-sm btn-category-status mb-2 ms-2" :disabled="mutationPending" @click="openStatus(category, 'root')">{{ category.status === 'active' ? '停用主分類' : '啟用主分類' }}</button>
-          <button type="button" class="btn btn-sm btn-outline-danger mb-2 ms-2" :disabled="mutationPending" @click="openDelete(category, 'root')">刪除主分類</button>
+          <button v-if="!demoAuth.isReadOnlyDemo" type="button" class="btn btn-sm btn-outline-secondary mb-2" :disabled="mutationPending" @click="openForm('root', category)">編輯主分類</button>
+          <button v-if="!demoAuth.isReadOnlyDemo" type="button" class="btn btn-sm btn-category-status mb-2 ms-2" :disabled="mutationPending" @click="openStatus(category, 'root')">{{ category.status === 'active' ? '停用主分類' : '啟用主分類' }}</button>
+          <button v-if="!demoAuth.isReadOnlyDemo" type="button" class="btn btn-sm btn-outline-danger mb-2 ms-2" :disabled="mutationPending" @click="openDelete(category, 'root')">刪除主分類</button>
           <div class="d-flex flex-wrap gap-3 small">
             <span>狀態：{{ statusLabel(category.status) }}</span>
             <span>排序：{{ category.sort_order }}</span>
@@ -177,9 +179,9 @@ onBeforeUnmount(() => { disposed = true; requestSequence++ })
         <ul v-if="category.children.length" class="list-group list-group-flush">
           <li v-for="child in category.children" :key="child.id" class="list-group-item">
             <h3 class="h6 mb-2">{{ child.name }}</h3>
-            <button type="button" class="btn btn-sm btn-outline-secondary mb-2" :disabled="mutationPending" @click="openForm('child', child)">編輯子分類</button>
-            <button type="button" class="btn btn-sm btn-category-status mb-2 ms-2" :disabled="mutationPending" @click="openStatus(child, 'child')">{{ child.status === 'active' ? '停用子分類' : '啟用子分類' }}</button>
-            <button type="button" class="btn btn-sm btn-outline-danger mb-2 ms-2" :disabled="mutationPending" @click="openDelete(child, 'child')">刪除子分類</button>
+            <button v-if="!demoAuth.isReadOnlyDemo" type="button" class="btn btn-sm btn-outline-secondary mb-2" :disabled="mutationPending" @click="openForm('child', child)">編輯子分類</button>
+            <button v-if="!demoAuth.isReadOnlyDemo" type="button" class="btn btn-sm btn-category-status mb-2 ms-2" :disabled="mutationPending" @click="openStatus(child, 'child')">{{ child.status === 'active' ? '停用子分類' : '啟用子分類' }}</button>
+            <button v-if="!demoAuth.isReadOnlyDemo" type="button" class="btn btn-sm btn-outline-danger mb-2 ms-2" :disabled="mutationPending" @click="openDelete(child, 'child')">刪除子分類</button>
             <div class="d-flex flex-wrap gap-3 small">
               <span>狀態：{{ statusLabel(child.status) }}</span>
               <span>排序：{{ child.sort_order }}</span>

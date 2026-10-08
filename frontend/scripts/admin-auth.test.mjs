@@ -80,6 +80,58 @@ after(async () => { console.error = originalError; await server.close() })
 
 const admin = { id: 1, name: '管理員', email: 'admin@example.test', status: 'active', permissions: ['product_manage'] }
 const newer = { ...admin, id: 2, email: 'new@example.test' }
+const demoIdentity = { id: 77, name: '唯讀Demo', email: 'readonly-demo@home-fit.invalid', status: 'active', permissions: [], is_demo: true }
+
+test('Demo entry: CSRF, zero grants, no retry, Member isolation', async () => {
+  api.defaults.adapter = async config => { calls.push(config); return response(config, config.url.endsWith('/csrf-cookie') ? {} : { data: demoIdentity }) }
+  await auth.startDemo()
+  assert.equal(auth.isReadOnlyDemo, true); assert.equal(auth.hasPermission('product_manage'), false)
+  assert.deepEqual(auth.currentAdmin.permissions, [])
+  assert.ok(calls[0].url.endsWith('/sanctum/csrf-cookie'))
+  assert.equal(calls[1].url, '/admin/demo'); assert.equal(calls[1].method, 'post')
+  assert.deepEqual(JSON.parse(calls[1].data), {}); assertMemberUntouched()
+})
+for (const status of [503, 429, 419, 403, undefined]) {
+  test(`Demo entry ${status ?? 'network'} preserves identity, no auto retry`, async () => {
+    api.defaults.adapter = async config => { calls.push(config); if (config.url.endsWith('/csrf-cookie')) return response(config, {}); throw failure(config, status) }
+    await assert.rejects(auth.startDemo()); assert.equal(calls.filter(c => c.method === 'post').length, 1)
+    assert.equal(auth.currentAdmin.id, admin.id); assertMemberUntouched()
+  })
+}
+for (const path of ['/admin/products/new', '/admin/products/1/edit', '/admin/users', '/admin/users/1', '/admin/orders', '/admin/orders/1', '/admin/admins']) {
+  test(`Demo rejects sensitive/mutation route ${path}`, async () => {
+    auth.currentAdmin = { ...demoIdentity }; auth.isAdminInitialized = true
+    const view = await mountRoute(path)
+    assert.equal(view.router.currentRoute.value.name, 'admin-forbidden')
+    assert.ok(!calls.some(c => /admin\/(users|orders|admins)/.test(c.url)))
+    assertMemberUntouched(); view.app.unmount()
+  })
+}
+for (const [path, forbidden] of [['/admin/products', ['新增商品']], ['/admin/products/1', ['編輯商品']], ['/admin/categories', ['新增主分類', '新增子分類', '編輯主分類']], ['/admin/inventory', ['調整庫存']], ['/admin/home-content', ['新增輪播', '選擇推薦商品']], ['/admin/dashboard', ['近期訂單']]]) {
+  test(`Demo readonly ${path}, five modules, no mutation request`, async () => {
+    auth.currentAdmin = { ...demoIdentity }; auth.isAdminInitialized = true
+    const view = await mountRoute(path)
+    assert.equal(view.router.currentRoute.value.fullPath, path); assert.ok(text(view.root).includes('唯讀Demo'))
+    for (const label of forbidden) assert.ok(!text(view.root).includes(label), label)
+    for (const module of ['dashboard', 'products', 'categories', 'inventory', 'home-content']) assert.ok(find(view.root, el => el.type === 'a' && el.props.href === '/admin/' + module), module)
+    for (const module of ['orders', 'users', 'admins']) assert.ok(!find(view.root, el => el.type === 'a' && el.props.href === '/admin/' + module), module)
+    assert.ok(calls.every(c => c.method === 'get')); assertMemberUntouched(); view.app.unmount()
+  })
+}
+test('Demo button pending prevents duplicate entry and waits before navigation', async () => {
+  let finish
+  api.defaults.adapter = config => { calls.push(config); return config.url.endsWith('/csrf-cookie') ? Promise.resolve(response(config, {})) : new Promise(resolve => { finish = () => resolve(response(config, { data: demoIdentity })) }) }
+  const view = await mount(), button = find(view.root, el => el.type === 'button' && text(el).includes('進入唯讀Demo'))
+  const first = button.props.onClick(); await settle(); await button.props.onClick()
+  assert.equal(calls.filter(c => c.method === 'post').length, 1); assert.equal(button.props.disabled, true); assert.deepEqual(nav, [])
+  finish(); await first; await settle(); assert.deepEqual(nav, ['success']); assertMemberUntouched(); view.app.unmount()
+})
+test('Late Demo entry cannot replace newer Admin', async () => {
+  let finish
+  api.defaults.adapter = config => config.url.endsWith('/csrf-cookie') ? Promise.resolve(response(config, {})) : new Promise(resolve => { finish = () => resolve(response(config, { data: demoIdentity })) })
+  const pending = auth.startDemo(); await settle(); auth.clearAdminSession(); auth.currentAdmin = { ...newer }; finish()
+  await assert.rejects(pending, state.AdminSessionInvalidatedError); assert.equal(auth.currentAdmin.id, newer.id); assertMemberUntouched()
+})
 const user = { id: 9, name: '會員', email: 'member@example.test', phone: '0912345678', status: 'active' }
 const payload = { email: admin.email, password: 'test-only' }
 const key = 'home-fitness-store-guest-cart'

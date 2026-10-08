@@ -11,6 +11,20 @@ const form = reactive({ email: '', password: '' })
 const submitting = ref(false)
 const loginError = ref('')
 const fieldErrors = ref<Record<string, string[]>>({})
+const enterDemo = async () => {
+  if (submitting.value) return
+  submitting.value = true
+  loginError.value = ''
+  try {
+    await auth.startDemo()
+    await notifyAdminLoginSuccess()
+  } catch (error) {
+    if (error instanceof AdminSessionInvalidatedError) return
+    loginError.value = axios.isAxiosError<ApiErrorResponse>(error)
+      ? error.response?.data?.message || '唯讀Demo暫時無法進入，請稍後再試。'
+      : '唯讀Demo暫時無法進入，請稍後再試。'
+  } finally { submitting.value = false }
+}
 
 const submit = async () => {
   if (submitting.value) return
@@ -57,6 +71,7 @@ const retryRestore = async () => {
 <template>
   <section class="admin-login container py-5" style="max-width: 480px">
     <h1 class="h3 mb-4">管理員登入</h1>
+    <button type="button" class="btn btn-outline-primary w-100 mb-3" :disabled="submitting" @click="enterDemo">進入唯讀Demo</button>
     <div v-if="auth.restoreError" class="alert alert-warning" role="alert">
       {{ auth.restoreError }}
       <button type="button" class="btn btn-sm btn-outline-dark ms-2" :disabled="auth.isRestoring" @click="retryRestore">重試</button>

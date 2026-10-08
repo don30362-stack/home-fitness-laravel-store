@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useAdminAuthStore } from '@/stores/adminAuth'
+const demoAuth = useAdminAuthStore()
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
@@ -89,14 +91,14 @@ const applyFilters = () => {
 const changePage = (page: number) => {
   void router.push({ query: { ...route.query, page: String(page) } })
 }
-const beginAdjustment = (row: AdminInventoryItem) => {
+const beginAdjustment = (row: AdminInventoryItem) => { if (demoAuth.isReadOnlyDemo) return;
   if (submitting.value) return
   selected.value = row
   adjustment.value = ''
   adjustmentError.value = ''
   success.value = ''
 }
-const submitAdjustment = async () => {
+const submitAdjustment = async () => { if (demoAuth.isReadOnlyDemo) return;
   if (submitting.value || !selected.value) return
   const value = Number(adjustment.value)
   if (
@@ -291,7 +293,7 @@ onBeforeUnmount(() => {
             <td>{{ row.low_stock_threshold }}</td>
             <td>{{ inventoryLabels[row.inventory_status] }}</td>
             <td>
-              <button
+              <button v-if="!demoAuth.isReadOnlyDemo"
                 type="button"
                 class="btn btn-sm btn-outline-primary"
                 :disabled="submitting"

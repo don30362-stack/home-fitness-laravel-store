@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import axios from 'axios'
 import type { ApiErrorResponse } from '@/types/api'
 import type { Admin, AdminLoginPayload, AdminPermissionCode } from '@/types/adminAuth'
-import { loginAdmin, getCurrentAdmin, logoutAdmin } from '@/services/adminAuthService'
+import { loginAdmin, enterAdminDemo, getCurrentAdmin, logoutAdmin } from '@/services/adminAuthService'
 import {
   AdminSessionInvalidatedError, getAdminGeneration, ensureAdminGeneration,
   startAdminGeneration, setAdminFailureHandler, type AdminFailureReason,
@@ -21,6 +21,7 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
   const adminFailureReason = ref<AdminFailureReason | null>(null)
   const adminFailureMessage = ref<string | null>(null)
   const isAdminAuthenticated = computed(() => currentAdmin.value !== null)
+  const isReadOnlyDemo = computed(() => currentAdmin.value?.is_demo === true)
   const permissionRefreshError = ref<string | null>(null)
   const isRefreshingPermissions = ref(false)
   const hasPermission = (code: AdminPermissionCode) => currentAdmin.value?.permissions.includes(code) ?? false
@@ -56,14 +57,14 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
     adminFailureReason.value = null
     reset()
   }
-  const login = async (payload: AdminLoginPayload) => {
+  const authenticate = async (operation: () => ReturnType<typeof loginAdmin>) => {
     const attempt = startAdminGeneration()
     pendingIdentityRefresh = null
     isRefreshingPermissions.value = false
     permissionRefreshError.value = null
     pendingRestore = null
     isRestoring.value = false
-    const response = await loginAdmin(payload)
+    const response = await operation()
     ensureAdminGeneration(attempt)
     startAdminGeneration()
     currentAdmin.value = response.data
@@ -73,6 +74,8 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
     adminFailureMessage.value = null
     return response
   }
+  const login = (payload: AdminLoginPayload) => authenticate(() => loginAdmin(payload))
+  const startDemo = () => authenticate(enterAdminDemo)
   const restoreAdmin = (): Promise<RestoreResult> => {
     if (pendingRestore) return pendingRestore
     const expected = getAdminGeneration()
@@ -164,6 +167,6 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
   })
 
   return { currentAdmin, isAdminAuthenticated, isAdminInitialized, isRestoring, restoreError,
-    adminFailureReason, adminFailureMessage, login, restoreAdmin, logout, clearAdminSession,
+    adminFailureReason, adminFailureMessage, login, startDemo, isReadOnlyDemo, restoreAdmin, logout, clearAdminSession,
     hasPermission, permissionRefreshError, isRefreshingPermissions, refreshAdminIdentity }
 })

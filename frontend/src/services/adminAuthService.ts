@@ -5,6 +5,13 @@ import type { ApiMessageOnlyResponse } from '@/types/api'
 
 const backendBaseUrl = import.meta.env.VITE_API_BASE_URL.replace(/\/api\/?$/, '')
 
+export const enterAdminDemo = async (): Promise<AdminLoginResponse> => {
+  const generation = getAdminGeneration()
+  await adminApi.get(`${backendBaseUrl}/sanctum/csrf-cookie`)
+  ensureAdminGeneration(generation)
+  return (await adminApi.post<AdminLoginResponse>('/admin/demo', {})).data
+}
+
 export const loginAdmin = async (payload: AdminLoginPayload): Promise<AdminLoginResponse> => {
   const generation = getAdminGeneration()
   await adminApi.get(`${backendBaseUrl}/sanctum/csrf-cookie`)
