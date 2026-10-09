@@ -132,6 +132,44 @@ test('Late Demo entry cannot replace newer Admin', async () => {
   const pending = auth.startDemo(); await settle(); auth.clearAdminSession(); auth.currentAdmin = { ...newer }; finish()
   await assert.rejects(pending, state.AdminSessionInvalidatedError); assert.equal(auth.currentAdmin.id, newer.id); assertMemberUntouched()
 })
+
+for (const reload of [false, true]) {
+  test(`Demo kill switch keeps logout after me denial (reload=${reload})`, async () => {
+    auth.currentAdmin = reload ? null : { ...demoIdentity }
+    auth.isAdminInitialized = !reload
+    api.defaults.adapter = async config => {
+      calls.push(config)
+      if (config.url === '/admin/logout') return response(config, { message: '已登出' })
+      throw failure(config, 403, 'DEMO_UNAVAILABLE')
+    }
+    if (!reload) await assert.rejects(auth.restoreAdmin())
+    const view = await mountRoute('/admin/products')
+    assert.ok(text(view.root).includes('唯讀Demo目前暫停開放'))
+    assert.ok(auth.demoUnavailable)
+    assert.equal(auth.adminFailureReason, null)
+    assert.equal(auth.currentAdmin?.id ?? null, reload ? null : demoIdentity.id)
+    assert.ok(calls.every(c => c.method === 'get'))
+    assertMemberUntouched()
+    const logout = find(view.root, el => el.type === 'button' && text(el) === '登出')
+    assert.ok(logout)
+    await logout.props.onClick(); await settle()
+    assert.equal(calls.filter(c => c.url === '/admin/logout').length, 1)
+    assert.equal(auth.currentAdmin, null)
+    assert.equal(auth.demoUnavailable, false)
+    assert.equal(view.router.currentRoute.value.name, 'admin-login')
+    assertMemberUntouched(); view.app.unmount()
+  })
+}
+
+test('Demo unavailable business GET does not refresh permissions or clear identity', async () => {
+  auth.currentAdmin = { ...demoIdentity }; auth.isAdminInitialized = true
+  api.defaults.adapter = async config => { calls.push(config); throw failure(config, 403, 'DEMO_UNAVAILABLE') }
+  await assert.rejects(productService.getAdminProducts())
+  assert.equal(calls.length, 1)
+  assert.equal(auth.currentAdmin.id, demoIdentity.id)
+  assert.equal(auth.adminFailureReason, null)
+  assert.deepEqual(nav, []); assertMemberUntouched()
+})
 const user = { id: 9, name: '會員', email: 'member@example.test', phone: '0912345678', status: 'active' }
 const payload = { email: admin.email, password: 'test-only' }
 const key = 'home-fitness-store-guest-cart'

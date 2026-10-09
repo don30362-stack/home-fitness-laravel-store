@@ -18,6 +18,7 @@ const retry = async () => {
 <template>
   <div class="admin-shell">
     <section v-if="auth.restoreError || !auth.isAdminInitialized" class="p-3" role="alert">
+      <AdminHeader v-if="auth.demoUnavailable" />
       <h1 class="h4">無法恢復管理員登入狀態</h1>
       <p>{{ auth.restoreError }}</p>
       <button type="button" class="btn btn-primary" :disabled="auth.isRestoring" @click="retry">{{ auth.isRestoring ? '重試中…' : '重試' }}</button>

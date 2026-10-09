@@ -18,6 +18,7 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
   const isAdminInitialized = ref(false)
   const isRestoring = ref(false)
   const restoreError = ref<string | null>(null)
+  const demoUnavailable = ref(false)
   const adminFailureReason = ref<AdminFailureReason | null>(null)
   const adminFailureMessage = ref<string | null>(null)
   const isAdminAuthenticated = computed(() => currentAdmin.value !== null)
@@ -32,6 +33,7 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
     currentAdmin.value = null
     isAdminInitialized.value = true
     restoreError.value = null
+    demoUnavailable.value = false
     permissionRefreshError.value = null
     if (adminFailureReason.value !== 'disabled' || reason === 'disabled') {
       adminFailureReason.value = reason
@@ -70,6 +72,7 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
     currentAdmin.value = response.data
     isAdminInitialized.value = true
     restoreError.value = null
+    demoUnavailable.value = false
     adminFailureReason.value = null
     adminFailureMessage.value = null
     return response
@@ -81,6 +84,7 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
     const expected = getAdminGeneration()
     isRestoring.value = true
     restoreError.value = null
+    demoUnavailable.value = false
     const request = (async (): Promise<RestoreResult> => {
       try {
         const response = await getCurrentAdmin()
@@ -98,7 +102,11 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
         }
         if (expected !== getAdminGeneration()) return 'stale'
         isAdminInitialized.value = false
-        restoreError.value = '無法恢復管理員登入狀態，請重試'
+        demoUnavailable.value = axios.isAxiosError<ApiErrorResponse>(error)
+          && error.response?.status === 403 && error.response.data?.code === 'DEMO_UNAVAILABLE'
+        restoreError.value = demoUnavailable.value
+          ? '唯讀Demo目前暫停開放，您仍可登出。'
+          : '無法恢復管理員登入狀態，請重試'
         throw error
       }
     })()
@@ -166,7 +174,7 @@ export const useAdminAuthStore = defineStore('adminAuth', () => {
     await notifyAdminPermissionsChanged(context, Boolean(permissionRefreshError.value))
   })
 
-  return { currentAdmin, isAdminAuthenticated, isAdminInitialized, isRestoring, restoreError,
+  return { currentAdmin, isAdminAuthenticated, isAdminInitialized, isRestoring, restoreError, demoUnavailable,
     adminFailureReason, adminFailureMessage, login, startDemo, isReadOnlyDemo, restoreAdmin, logout, clearAdminSession,
     hasPermission, permissionRefreshError, isRefreshingPermissions, refreshAdminIdentity }
 })

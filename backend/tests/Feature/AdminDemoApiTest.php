@@ -31,6 +31,75 @@ class AdminDemoApiTest extends TestCase
         return $admin;
     }
 
+    public function test_kill_switch_blocks_same_session_all_eight_reads_and_preserves_logout_and_member(): void
+    {
+        // Reused test application needs the default guard reset between requests.
+        $send = function (string $method, string $url, array $data = []) {
+            Auth::shouldUse('web');
+            return $this->json($method, $url, $data);
+        };
+        $demo = $this->demo();
+        $member = User::factory()->create();
+        $product = Product::factory()->create(['category_id' => \App\Models\Category::create(['name' => 'Fixture', 'status' => 'active', 'sort_order' => 0])->id]);
+        $this->actingAs($member, 'web');
+        $send('POST', '/api/admin/demo')->assertOk();
+        $sessionId = app('session.store')->getId();
+        $this->withCredentials()->withCookie(config('session.cookie'), $sessionId);
+        $reads = ['me', 'dashboard', 'products', 'products/'.$product->id,
+            'categories', 'inventory', 'banners', 'recommended-products'];
+        foreach ($reads as $path) {
+            $response = $send('GET', '/api/admin/'.$path);
+            $this->assertSame(200, $response->status(), $path.' '.$response->getContent());
+        }
+
+        // Accidental grants cannot bypass either the whitelist or kill switch.
+        foreach (Permission::CATALOG as $code => $name) {
+            $demo->permissions()->attach(Permission::create(compact('code', 'name')));
+        }
+        config(['demo.enabled' => false]);
+        foreach ($reads as $path) {
+            $send('GET', '/api/admin/'.$path)->assertForbidden()->assertJsonPath('code', 'DEMO_UNAVAILABLE');
+        }
+        $send('PATCH', '/api/admin/products/'.$product->id, ['name' => 'blocked'])
+            ->assertForbidden()->assertJsonPath('code', 'DEMO_UNAVAILABLE');
+        $send('GET', '/api/admin/orders')->assertForbidden()->assertJsonPath('code', 'DEMO_UNAVAILABLE');
+        $send('POST', '/api/admin/demo')->assertStatus(503);
+        $this->assertSame($sessionId, app('session.store')->getId());
+        $this->assertAuthenticatedAs($demo, 'admin');
+        $this->assertAuthenticatedAs($member, 'web');
+        $send('POST', '/api/admin/logout')->assertOk();
+        $this->assertGuest('admin');
+        $this->assertAuthenticatedAs($member, 'web');
+        $this->assertNotSame('blocked', $product->fresh()->name);
+        $this->assertDatabaseCount('admin_permission', 7);
+    }
+
+    public function test_disabled_switch_does_not_change_normal_admin_permissions_or_owner_session(): void
+    {
+        config(['demo.enabled' => false]);
+        $owner = Admin::factory()->create(['status' => 'active']);
+        $this->actingAs($owner, 'admin');
+        $this->getJson('/api/admin/products')->assertForbidden()->assertJsonPath('code', 'ADMIN_PERMISSION_DENIED');
+        foreach (Permission::CATALOG as $code => $name) {
+            $owner->permissions()->attach(Permission::create(compact('code', 'name')));
+        }
+        $this->getJson('/api/admin/products')->assertOk();
+        $this->getJson('/api/admin/orders')->assertOk();
+        $this->getJson('/api/admin/me')->assertOk()->assertJsonCount(7, 'data.permissions');
+        $this->assertAuthenticatedAs($owner, 'admin');
+    }
+
+    public function test_session_marker_stays_demo_when_email_and_configuration_change(): void
+    {
+        $demo = $this->demo();
+        $this->postJson('/api/admin/demo')->assertOk();
+        $demo->update(['email' => 'changed@example.test']);
+        config(['demo.enabled' => false, 'demo.admin_id' => null]);
+        $this->getJson('/api/admin/me')->assertForbidden()->assertJsonPath('code', 'DEMO_UNAVAILABLE');
+        $this->postJson('/api/admin/logout')->assertOk();
+        $this->assertGuest('admin');
+    }
+
     public function test_entry_and_me_have_zero_grants_and_rotate_session(): void
     {
         $demo = $this->demo();
