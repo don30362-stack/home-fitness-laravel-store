@@ -78,3 +78,48 @@ docker compose --env-file /srv/homefit-secrets/production.env -f compose.product
 DNS/80/443、Image tag 存在性、兩配置 nginx -t、無憑證冷啟動、未知 Host/SNI 拒絕、HTTP 308（ACME 例外）、TLS 憑證鏈／續期、public storage HTTP、CSRF `/sanctum/csrf-cookie` 204、member/admin/Demo 登入/me/logout、Secure cookie、419／CORS、Demo kill switch，以及資源限制／1GB Swap／還原。不能用本機靜態檢查宣稱以上已通過。
 
 HSTS/preload 暫不加入，以免憑證與續期尚未驗證就鎖定瀏覽器。Resource caps 與 FPM/DB sizing 依 Step3 量測調整；本設定尚不是 Stage30 整體完成。
+
+
+## Docker 日誌輪替與故障排查
+
+正式 app／web／db 都明確使用 `json-file`：`max-size: "10m"`、`max-file: "3"`。三份包含目前正在寫入的檔案；達上限自動輪替並移除最舊的檔案，並非保留三份歷史加一份目前檔案。每容器名目約30MB、三容器約90MB，為單筆訊息越界、metadata等至少預留120MiB空間；這不是整個Docker資料目錄硬配額，也不是按天保留。高流量時可追溯時段會縮短。
+
+- Laravel 已指定 `LOG_CHANNEL=stderr`、`LOG_LEVEL=warning`，Monolog 寫 `php://stderr`；不另外啟用daily檔案，以免重複寫入並繞過Docker輪替。emergency fallback仍可能寫storage/logs/laravel.log，若出現要排查logger/config/cache問題，不能假設所有檔案日誌都受此限制。
+- PHP-FPM 官方基底設定將error/access log送 `/proc/self/fd/2`，`catch_workers_output=yes`、`decorate_workers_output=no`，可收集worker的stdout/stderr。未改FPM Image。
+- Nginx基底的access/error log分別symlink至 `/dev/stdout`／`/dev/stderr`；本專案兩個server配置沿用它們。內部healthcheck也會產生access log，已包含在web輪替預算。
+- MariaDB預設console/error輸出可由Docker stderr收集；本輪唯讀檢查現有設定檔，未發現另設error檔案或啟用general/slow/binlog。未查詢DB或據此宣稱正式runtime有效值已驗證；本輪/proc/1/fd連結無法讀出，未將它算作stdout/stderr管線實證。MariaDB在Unix未指定log_error時預設寫stderr，見 https://mariadb.com/docs/server/server-management/server-monitoring-logs/error-log 。不要為排查預設開啟general/slow query log，它們可能含完整SQL及私人資料；DB binary log／資料檔若啟用，也不受Docker輪替限制。
+- Certbot仍是 `run --rm` 的短生命週期工具，不包含在三個常駐容器預算；其憑證目錄與工具內檔案、DB Volume、備份包、Image、OS journal等不受這個90MB預算控制。
+
+以下只供後續已授權的部署操作者使用；本次沒有recreate或改動現有容器。新logging設定在新建／recreate容器時套用，單純restart不能更新它；不要為此重啟Docker daemon，也不要將正式設定套到本機Compose。部署時核對三個新容器的LogConfig，勿輸出完整inspect（含Runtime秘密）。
+
+```sh
+docker compose --env-file /srv/homefit-secrets/production.env -f compose.production.yaml logs --since 15m --tail 100 --timestamps app web db
+docker compose --env-file /srv/homefit-secrets/production.env -f compose.production.yaml ps
+# 對每個正式容器ID各執行；不要原樣執行placeholder。
+docker inspect --format '{{json .HostConfig.LogConfig}}' '<production-container-id>'
+# DockerRootDir沒有帳密；確認實際data-root，勿假設一定是/var/lib/docker。
+docker info --format '{{.DockerRootDir}}'
+df -h /
+df -i /
+docker system df
+```
+
+`docker system df`不完整涵蓋container log使用量，不能用它單獨宣稱日誌占用正常。於Linux主機以實際DockerRootDir檢查檔案系統空間，必要時只做metadata容量統計（不讀取內容或操作輪替檔）：
+
+```sh
+homefit_docker_root=$(docker info --format '{{.DockerRootDir}}')
+df -h "$homefit_docker_root"
+sudo du -sh "$homefit_docker_root/containers"
+```
+
+containers目錄也含其他metadata，上述只是粗略容量。磁碟不足時先定位來源（log、DB、Image、備份或OS）、檢查輪替是否已套用及是否有其他檔案logger；不要手動truncate/remove Docker管理的日誌，不使用全域prune或down -v。記錄logger缺失、Permission denied、No space left、反覆重啟等訊息，依原始原因處理；輪替不能修復已滿的DB Volume。若logs看不到資料，核對service／時間範圍、driver、Laravel config cache、stdout/stderr與FPM設定；不要用dump .env或完整request來除錯。
+
+### 日誌敏感資訊
+
+Docker logging只負責收集／輪替，沒有自動遮罩功能。操作者與Docker權限持有人能讀取日誌；日誌只供受限維運，貼到issue／截圖／evidence前必須去識別化。
+
+目前Nginx主設定使用combined-like格式，會記錄request URI（含query）、Referer、IP、User-Agent及X-Forwarded-For；未設定記錄request body、Cookie或Authorization。不得把密碼／token／個資放在URL或Referer，也不要增加 `$request_body`、`$http_cookie`、`$http_authorization`。任意訪客仍可能將敏感字串放進query；若要從格式上排除query／Referer，需要另行確認最小Nginx log-format補強，本輪僅Compose輪替，不自行修改Nginx或Image。
+
+Laravel warning/error及exception context也可能包含SQL綁定值或私人資料；`APP_DEBUG=false`與warning level不代表日誌已去識別。此次只讀檢查的auth/controller、middleware與service未見直接記錄完整request或帳密的呼叫，但不是全面敏感資料保證。禁止為故障排查新增password、Cookie、Token、APP_KEY、完整會員／地址／訂單payload的log；真實日誌不納入Git或公開證據。
+
+官方依據：https://docs.docker.com/engine/logging/drivers/json-file/ 。正式部署後仍須確認實際LogConfig及磁碟使用；本輪Compose靜態檢查不等於已在AWS套用或完成輪替壓力驗證。

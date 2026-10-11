@@ -5,6 +5,11 @@ services:
   app:
     image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required}/home-fitness-app:sha-${RELEASE_SHA:?RELEASE_SHA is required}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       APP_NAME: Home Fitness
       APP_ENV: production
@@ -58,6 +63,11 @@ services:
   web:
     image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required}/home-fitness-web:sha-${RELEASE_SHA:?RELEASE_SHA is required}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     ports:
       - "80:80"
       - "443:443"
@@ -89,6 +99,11 @@ services:
   db:
     image: mariadb:11.4
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       MARIADB_DATABASE: ${HFS_DB_NAME:?HFS_DB_NAME is required}
       MARIADB_USER: ${HFS_DB_USER:?HFS_DB_USER is required}
