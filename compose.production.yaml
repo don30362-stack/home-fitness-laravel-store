@@ -1,0 +1,123 @@
+# Standalone production stack; never merge with compose.yaml.
+name: hfs-stage30-production
+
+services:
+  app:
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required}/home-fitness-app:sha-${RELEASE_SHA:?RELEASE_SHA is required}
+    restart: unless-stopped
+    environment:
+      APP_NAME: Home Fitness
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY:?APP_KEY is required}
+      APP_URL: https://homefit-store.ddnsfree.com
+      SANCTUM_STATEFUL_DOMAINS: homefit-store.ddnsfree.com
+      SESSION_DRIVER: file
+      SESSION_COOKIE: homefit_production_session
+      SESSION_DOMAIN: "null"
+      SESSION_PATH: /
+      SESSION_SECURE_COOKIE: "true"
+      SESSION_HTTP_ONLY: "true"
+      SESSION_SAME_SITE: lax
+      SESSION_PARTITIONED_COOKIE: "false"
+      CACHE_STORE: file
+      QUEUE_CONNECTION: sync
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: warning
+      ADMIN_DEMO_ENABLED: ${ADMIN_DEMO_ENABLED:-false}
+      ADMIN_DEMO_ID: ${ADMIN_DEMO_ID:-}
+      DB_CONNECTION: mysql
+      DB_URL: ""
+      DB_SOCKET: ""
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_DATABASE: ${HFS_DB_NAME:?HFS_DB_NAME is required}
+      DB_USERNAME: ${HFS_DB_USER:?HFS_DB_USER is required}
+      DB_PASSWORD: ${HFS_DB_PASSWORD:?HFS_DB_PASSWORD is required}
+    volumes:
+      - app_framework:/var/www/html/storage/framework
+      - private_files:/var/www/html/storage/app/private
+      - public_storage:/var/www/html/storage/app/public
+      # Production-only exact origins; image and local config remain unchanged.
+      - type: bind
+        source: ./deploy/production/laravel/cors.php
+        target: /var/www/html/config/cors.php
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit((int)!@fsockopen('127.0.0.1', 9000));"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required}/home-fitness-web:sha-${RELEASE_SHA:?RELEASE_SHA is required}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - public_storage:/usr/share/nginx/html/storage:ro
+      - acme_webroot:/var/www/acme:ro
+      - type: bind
+        source: ${HFS_TLS_DIR:?HFS_TLS_DIR is required}
+        target: /etc/letsencrypt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HFS_NGINX_CONFIG:-./deploy/production/nginx/acme-only.conf}
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/up"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      app:
+        condition: service_healthy
+
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${HFS_DB_NAME:?HFS_DB_NAME is required}
+      MARIADB_USER: ${HFS_DB_USER:?HFS_DB_USER is required}
+      MARIADB_PASSWORD: ${HFS_DB_PASSWORD:?HFS_DB_PASSWORD is required}
+      MARIADB_ROOT_PASSWORD: ${HFS_DB_ROOT_PASSWORD:?HFS_DB_ROOT_PASSWORD is required}
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Explicit short-lived tool, excluded from ordinary up; not a fourth resident service.
+  certbot:
+    image: certbot/certbot:v5.8.0
+    profiles: ["tools"]
+    volumes:
+      - acme_webroot:/var/www/acme
+      - type: bind
+        source: ${HFS_TLS_DIR:?HFS_TLS_DIR is required}
+        target: /etc/letsencrypt
+        bind:
+          create_host_path: false
+
+volumes:
+  app_framework:
+  private_files:
+  public_storage:
+  db_data:
+  acme_webroot:
