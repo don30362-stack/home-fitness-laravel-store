@@ -272,16 +272,18 @@ class OrderCancellationApiTest extends TestCase
             $this->actingAs($user, 'web')->postJson($this->url($order))->assertOk();
             $locks = [];
             foreach ($connection->getQueryLog() as $query) {
-                if (str_starts_with($query['query'], 'select * from "products"')) {
+                // Normalize identifier quoting; preserve acquisition-order assertions.
+                $sql = str_replace('`', '"', $query['query']);
+                if (str_starts_with($sql, 'select * from "products"')) {
                     $locks[] = ['product', $query['bindings'][0]];
-                } elseif (str_starts_with($query['query'], 'select * from "product_variants"')) {
+                } elseif (str_starts_with($sql, 'select * from "product_variants"')) {
                     $locks[] = ['variant', $query['bindings'][0]];
                 }
             }
         } finally {
             $connection->disableQueryLog();
         }
-        // SQLite strips FOR UPDATE: this verifies sequence, not real row locks.
+        // This checks query sequence; it does not prove concurrent lock waiting.
         $this->assertSame([
             ['product', $first->id], ['variant', $variantA->id],
             ['product', $first->id], ['variant', $variantB->id], ['product', $last->id],

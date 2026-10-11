@@ -309,7 +309,8 @@ class AdminInventoryApiTest extends TestCase
         $connection->enableQueryLog();
         try {
             app(AdminInventoryService::class)->adjustVariant($v->id, 1);
-            $queries = array_column($connection->getQueryLog(), 'query');
+            // Normalize identifier quoting across SQLite and MySQL/MariaDB grammars.
+            $queries = array_map(fn ($sql) => str_replace('`', '"', $sql), array_column($connection->getQueryLog(), 'query'));
             $parent = array_search(true, array_map(fn ($sql) => str_starts_with($sql, 'select * from "products"'), $queries));
             $variants = array_keys(array_filter($queries, fn ($sql) => str_starts_with($sql, 'select * from "product_variants"')));
             $this->assertNotFalse($parent);
