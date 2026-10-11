@@ -1,0 +1,96 @@
+name: hfs-stage30-local
+
+services:
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: home-fitness-app:step2
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit((int)!@fsockopen('127.0.0.1', 9000));"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY:?APP_KEY is required}
+      APP_URL: "http://127.0.0.1:8081"
+      SANCTUM_STATEFUL_DOMAINS: "127.0.0.1:8081,localhost:8081"
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: warning
+      SESSION_DRIVER: file
+      CACHE_STORE: file
+
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_DATABASE: ${HFS_DB_NAME:?HFS_DB_NAME is required}
+      DB_USERNAME: ${HFS_DB_USER:?HFS_DB_USER is required}
+      DB_PASSWORD: ${HFS_DB_PASSWORD:?HFS_DB_PASSWORD is required}
+
+    volumes:
+      - app_private:/var/www/html/storage/framework
+      - private_files:/var/www/html/storage/app/private
+      - public_storage:/var/www/html/storage/app/public
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: home-fitness-web:step2
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/up"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    ports:
+      - "127.0.0.1:8081:80"
+
+    volumes:
+      - public_storage:/usr/share/nginx/html/storage:ro
+
+    depends_on:
+      app:
+        condition: service_healthy
+
+  db:
+    image: mariadb:11.4
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    environment:
+      MARIADB_DATABASE: ${HFS_DB_NAME:?HFS_DB_NAME is required}
+      MARIADB_USER: ${HFS_DB_USER:?HFS_DB_USER is required}
+      MARIADB_PASSWORD: ${HFS_DB_PASSWORD:?HFS_DB_PASSWORD is required}
+      MARIADB_ROOT_PASSWORD: ${HFS_DB_ROOT_PASSWORD:?HFS_DB_ROOT_PASSWORD is required}
+
+    volumes:
+      - db_data:/var/lib/mysql
+
+volumes:
+  app_private:
+  private_files:
+  public_storage:
+  db_data:

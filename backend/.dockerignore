@@ -1,0 +1,27 @@
+.git
+.env
+.env.*
+!.env.example
+
+vendor/
+node_modules/
+tests/
+
+storage/
+bootstrap/cache/
+
+.phpunit.cache/
+coverage/
+*.log
+*.sqlite
+*.sql
+*.sql.gz
+
+# Windows 本機 Laravel storage 符號連結
+public/storage
+
+# Composer authentication
+auth.json
+
+# npm configuration
+.npmrc

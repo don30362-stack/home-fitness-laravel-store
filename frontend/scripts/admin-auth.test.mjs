@@ -613,6 +613,67 @@ for (const action of ['add', 'delete', 'reorder']) {
  }
 }
 
+for (const apiBaseUrl of ['/api', 'http://127.0.0.1:8000/api']) {
+  for (const entry of ['loginAdmin', 'enterAdminDemo']) {
+    test(`CSRF resolved URL: ${apiBaseUrl} / ${entry}`, async () => {
+      // Load real services with each build-time environment; inspect Axios's merged URL.
+      const isolated = await createServer({
+        server: { middlewareMode: true }, appType: 'custom',
+        define: { 'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiBaseUrl) },
+      })
+      try {
+        const { default: transport } = await isolated.ssrLoadModule('/src/services/adminApi.ts')
+        const authService = await isolated.ssrLoadModule('/src/services/adminAuthService.ts')
+        const session = await isolated.ssrLoadModule('/src/services/adminSessionState.ts')
+        const requests = []
+        transport.defaults.adapter = async config => {
+          requests.push(config)
+          return response(config, { data: admin, message: '成功' })
+        }
+        await authService[entry](payload)
+        await authService.getCurrentAdmin()
+        await authService.logoutAdmin()
+
+        const origin = 'http://127.0.0.1:5239'
+        const backendOrigin = apiBaseUrl.startsWith('http') ? 'http://127.0.0.1:8000' : origin
+        const endpoint = entry === 'loginAdmin' ? 'login' : 'demo'
+        const uris = requests.map(config => transport.getUri(config))
+        assert.deepEqual(uris, [
+          apiBaseUrl.startsWith('http') ? `${backendOrigin}/sanctum/csrf-cookie` : '/sanctum/csrf-cookie',
+          `${apiBaseUrl}/admin/${endpoint}`, `${apiBaseUrl}/admin/me`, `${apiBaseUrl}/admin/logout`,
+        ])
+        assert.deepEqual(uris.map(uri => new URL(uri, origin).href), [
+          `${backendOrigin}/sanctum/csrf-cookie`, `${backendOrigin}/api/admin/${endpoint}`,
+          `${backendOrigin}/api/admin/me`, `${backendOrigin}/api/admin/logout`,
+        ])
+        assert.ok(!uris.some(uri => new URL(uri, origin).pathname === '/api/sanctum/csrf-cookie'))
+        assert.deepEqual(requests.map(config => config.method), ['get', 'post', 'get', 'post'])
+        assert.deepEqual(JSON.parse(requests[1].data), entry === 'loginAdmin' ? payload : {})
+        for (const config of requests) {
+          assert.equal(config.withCredentials, true)
+          assert.equal(config.withXSRFToken, true)
+          assert.equal(config.headers.get('Accept'), 'application/json')
+        }
+        assert.equal(transport.defaults.baseURL, apiBaseUrl)
+
+        // A changed session during CSRF must still prevent the following login/Demo POST.
+        requests.length = 0
+        transport.defaults.adapter = async config => {
+          requests.push(config)
+          session.startAdminGeneration()
+          return response(config, {})
+        }
+        await assert.rejects(authService[entry](payload), session.AdminSessionInvalidatedError)
+        assert.equal(requests.length, 1)
+        assert.equal(requests[0].method, 'get')
+        assertMemberUntouched()
+      } finally {
+        await isolated.close()
+      }
+    })
+  }
+}
+
 test('獨立 transport／service：CSRF→login、me、logout 及四欄 envelope', async () => {
   assert.notEqual(api, memberApi)
   assert.equal(api.defaults.baseURL, memberApi.defaults.baseURL)
