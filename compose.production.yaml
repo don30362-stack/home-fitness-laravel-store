@@ -5,6 +5,7 @@ services:
   app:
     image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required}/home-fitness-app:sha-${RELEASE_SHA:?RELEASE_SHA is required}
     restart: unless-stopped
+    mem_limit: 512m
     logging:
       driver: json-file
       options:
@@ -40,6 +41,12 @@ services:
       DB_USERNAME: ${HFS_DB_USER:?HFS_DB_USER is required}
       DB_PASSWORD: ${HFS_DB_PASSWORD:?HFS_DB_PASSWORD is required}
     volumes:
+      - type: bind
+        source: ./deploy/production/php/zzz-homefit-resources.ini
+        target: /usr/local/etc/php/conf.d/zzz-homefit-resources.ini
+        read_only: true
+        bind:
+          create_host_path: false
       - app_framework:/var/www/html/storage/framework
       - private_files:/var/www/html/storage/app/private
       - public_storage:/var/www/html/storage/app/public
@@ -63,6 +70,7 @@ services:
   web:
     image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER is required}/home-fitness-web:sha-${RELEASE_SHA:?RELEASE_SHA is required}
     restart: unless-stopped
+    mem_limit: 96m
     logging:
       driver: json-file
       options:
@@ -99,6 +107,7 @@ services:
   db:
     image: mariadb:11.4
     restart: unless-stopped
+    mem_limit: 768m
     logging:
       driver: json-file
       options:
@@ -110,6 +119,12 @@ services:
       MARIADB_PASSWORD: ${HFS_DB_PASSWORD:?HFS_DB_PASSWORD is required}
       MARIADB_ROOT_PASSWORD: ${HFS_DB_ROOT_PASSWORD:?HFS_DB_ROOT_PASSWORD is required}
     volumes:
+      - type: bind
+        source: ./deploy/production/mariadb/zz-homefit-resources.cnf
+        target: /etc/mysql/conf.d/zz-homefit-resources.cnf
+        read_only: true
+        bind:
+          create_host_path: false
       - db_data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]

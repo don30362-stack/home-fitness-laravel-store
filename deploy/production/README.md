@@ -77,7 +77,7 @@ docker compose --env-file /srv/homefit-secrets/production.env -f compose.product
 
 DNS/80/443、Image tag 存在性、兩配置 nginx -t、無憑證冷啟動、未知 Host/SNI 拒絕、HTTP 308（ACME 例外）、TLS 憑證鏈／續期、public storage HTTP、CSRF `/sanctum/csrf-cookie` 204、member/admin/Demo 登入/me/logout、Secure cookie、419／CORS、Demo kill switch，以及資源限制／1GB Swap／還原。不能用本機靜態檢查宣稱以上已通過。
 
-HSTS/preload 暫不加入，以免憑證與續期尚未驗證就鎖定瀏覽器。Resource caps 與 FPM/DB sizing 依 Step3 量測調整；本設定尚不是 Stage30 整體完成。
+HSTS/preload 暫不加入，以免憑證與續期尚未驗證就鎖定瀏覽器。目前已加入下述初始Resource caps與FPM/DB sizing；仍須依Step3 AWS量測調整，本設定尚不是Stage30整體完成。
 
 
 ## Docker 日誌輪替與故障排查
@@ -123,3 +123,69 @@ Docker logging只負責收集／輪替，沒有自動遮罩功能。操作者與
 Laravel warning/error及exception context也可能包含SQL綁定值或私人資料；`APP_DEBUG=false`與warning level不代表日誌已去識別。此次只讀檢查的auth/controller、middleware與service未見直接記錄完整request或帳密的呼叫，但不是全面敏感資料保證。禁止為故障排查新增password、Cookie、Token、APP_KEY、完整會員／地址／訂單payload的log；真實日誌不納入Git或公開證據。
 
 官方依據：https://docs.docker.com/engine/logging/drivers/json-file/ 。正式部署後仍須確認實際LogConfig及磁碟使用；本輪Compose靜態檢查不等於已在AWS套用或完成輪替壓力驗證。
+
+
+## Lightsail 2GB RAM 初始資源配置
+
+本節為使用者確認的部署前初始值，不是AWS實測或不會OOM的保證。只使用正式Compose，沒有CPU硬quota或mem_reservation，也沒有修改本機Compose或Image。
+
+| 常駐容器 | mem_limit | 內部設定 |
+| --- | --- | --- |
+| app | 512m（512MiB） | PHP memory_limit=128M、OPcache memory_consumption=128MiB |
+| db | 768m（768MiB） | InnoDB Buffer Pool256M、max_connections20、Aria cache32M、key buffer16M |
+| web | 96m（96MiB） | 保留既有Nginx／TLS配置 |
+
+上限合計1376MiB；按主機2048MiB估算，剩672MiB給Ubuntu／Kernel／Docker／page cache及短任務。可暫按系統與Docker384MiB、單一短任務192MiB、額外96MiB餘裕規劃；不是實測消耗或預先保留，實際MemTotal可能較少。三容器同時到上限時餘裕偏緊，不能持續貼近上限運作。
+
+### PHP／MariaDB 配置載入
+
+- PHP新檔唯讀掛載至 `/usr/local/etc/php/conf.d/zzz-homefit-resources.ini`，排序在Image既有 `zz-home-fitness-opcache.ini`／uploads之後。只明確設定memory_limit與OPcache容量；不重複設定enable或validate_timestamps，保留既有OPcache啟用及validate_timestamps=0。
+- FPM保留ondemand、max_children=2、process_idle_timeout=10s、max_requests=500。兩worker並非完整記憶體上限；PHP memory_limit不是RSS硬限制，共享OPcache、native配置、master與CLI另計。
+- MariaDB新檔唯讀掛載 `/etc/mysql/conf.d/zz-homefit-resources.cnf`，使用 `[mysqld]`。本輪唯讀確認現有官方11.4同基底的my.cnf確實include此目錄（在mariadb.conf.d之後）。保留官方其他配置，不覆蓋整個conf.d目錄。
+- Linux部署檔案保持0644／不可world-writable，MariaDB可能忽略world-writable設定；設定檔不得放密碼。bind mount設create_host_path=false，來源缺少時拒絕啟動。
+- 不更改交易隔離、flush耐久性、FK、鎖定或帳號規則。Buffer Pool不包含全部DB記憶體，其他全域cache、連線、排序／暫存表與備份另計。20條連線是初始上限，不是20條都能同時執行重型SQL的容量保證。
+- 這些Runtime掛載無需重建GHCR Image；新建／recreate正式容器才會套用mount與cgroup限制。檔案內容更新後相應PHP-FPM／DB程序也須重新載入；本輪不操作現有服務，不保證舊程序自動生效。部署時再核對PHP CLI與FPM各自有效設定。
+
+### Swap：尚未設定個別容器memswap_limit
+
+1GB host Swap尚未在AWS建立；只作短暫OOM緩衝，不增加實體RAM，也不應作穩態容量。頻繁swap-in/out會放大IO、DB鎖等待與Checkout延遲。
+
+`mem_limit`是RAM限制；明確的`memswap_limit`表示RAM＋Swap總額，不是「額外Swap」。本次不寫memswap_limit、mem_swappiness或oom_kill_disable。**省略memswap_limit不代表禁止Swap**：依Docker文件，在支援Swap且host有Swap時，通常允許額外等於memory limit的Swap，仍受host共享容量限制。
+
+| 容器 | RAM限制 | 省略memswap_limit時可能允許的額外Swap | RAM＋Swap名目總額 |
+| --- | --- | --- | --- |
+| app | 512MiB | 512MiB | 1024MiB |
+| db | 768MiB | 768MiB | 1536MiB |
+| web | 96MiB | 96MiB | 192MiB |
+| 合計 | 1376MiB | 1376MiB | 2752MiB |
+
+這不是新增1376MiB Swap：host只有預計1024MiB，而且系統／短任務也共用；各容器無法保證同時取得表中Swap。個別容器是否禁用／限額Swap及具體memswap_limit，列為AWS實測前待決門檻，必須核對Docker/cgroup Swap支援與實際HostConfig.MemorySwap後再決定，不可將本表當明確已套用的Swap配置。
+
+官方語意：https://docs.docker.com/reference/compose-file/services/#memswap_limit 。不要停用OOM killer；容器被OOM kill仍可能發生於host尚有空間時，因為先碰到容器限制。
+
+### 部署後觀察與驗收（指令供後續授權，這次未執行）
+
+```sh
+docker compose --env-file /srv/homefit-secrets/production.env -f compose.production.yaml stats --no-stream
+free -m
+vmstat 1 10
+# 對每個正式容器ID執行，僅輸出必要欄位，不用完整inspect。
+docker inspect --format 'RAM={{.HostConfig.Memory}} RAMplusSwap={{.HostConfig.MemorySwap}} OOM={{.State.OOMKilled}} Restarts={{.RestartCount}}' '<production-container-id>'
+# 核心訊息可能含程序資訊，僅於受限維運終端檢視。
+sudo journalctl -k --since '1 hour ago' | grep -Ei 'out of memory|oom|killed process'
+```
+
+代表性操作期間建議MemAvailable維持至少300MiB；持續低於200MiB或容器用量長期超過上限80～85%需調查。要求OOM／非預期restart=0、無持續swap-in/out、無新502／504；這些是初始驗收門檻，不是本輪已通過結果。docker stats與host memory統計口徑不同（cache／共享頁等），需一起看。
+
+使用正式受限DB登入方式（互動輸入、不把密碼放CLI參數），後續只讀確認：
+
+```sql
+SHOW GLOBAL VARIABLES WHERE Variable_name IN ('innodb_buffer_pool_size','max_connections','aria_pagecache_buffer_size','key_buffer_size');
+SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected','Threads_running','Max_used_connections','Connection_errors_max_connections','Innodb_buffer_pool_reads','Innodb_buffer_pool_read_requests');
+```
+
+DB無Too many connections、異常長交易或持續鎖等待；FPM不持續排隊／反覆max_children reached。FPM目前未配置status endpoint，不可假稱已有queue數據；需要時另外設內部限定監控，不能公開請求資訊。觀察Checkout／取消／庫存調整的正常回應與一致性，不以增加workers／連線數掩蓋鎖等待。
+
+備份、PHP CLI／Artisan、壓縮與Certbot會競爭主機記憶體。exec進app的CLI共用512MiB cgroup，exec進db的dump也共用768MiB；host或其他容器執行則另占主機預算。兩個FPM worker加CLI仍可能超限。維運一次一個重型任務、串流dump／壓縮、避開尖峰；不在Lightsail進行npm／Composer build。Certbot只有192MiB的估計短任務預算，尚未設定硬限制，也不保證實際夠用。
+
+舊原生DB與Docker Lab須依既定備份／退役授權處理，不能三套DB並跑後再靠Swap補救。本輪未做AWS量測、壓力測試、備份或任何服務重建。
