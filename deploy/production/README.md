@@ -1,4 +1,4 @@
-# 正式 HTTPS 部署設定（Stage30 Step2）
+# 正式部署與維運 Runbook（Stage30 Step2）
 
 正式網域：`homefit-store.ddnsfree.com`。本文件是後續操作指引，本次沒有執行部署、DNS、憑證申請或服務操作。
 
@@ -13,7 +13,7 @@
 
 ## 初始化與切換（僅於後續授權部署時執行）
 
-下列 Linux 指令均假設工作目錄為專案根目錄，runtime 檔已由操作者安全建立。不要用本機或舊展示 Volume。先完成新 Volume／展示資料／Owner／備份等公開前門檻；本設定不會自行執行 migration、import 或帳號初始化。
+下列 Linux 指令均假設工作目錄為專案根目錄，runtime 檔已由操作者安全建立。不要用本機或舊展示 Volume。本節只說明 ACME/TLS 技術切換，完整首次部署順序以後文「正式操作 Runbook」為準；啟動 ACME-only 後，先完成 migration／展示資料／Owner 等門檻，再申請憑證及開放 HTTPS。本設定不會自行執行 migration、import 或帳號初始化。
 
 1. 核對 DNS A 指向既有 Static IPv4；沒有可用 IPv6 就不要配置 AAAA。開放必要的 80/443，其他管理 port 另依主機安全策略。確認沒有舊服務占用 port。這些工作本輪未執行。
 2. 預先建立 runtime 所指定的私有 HFS_TLS_DIR，目錄須存在（create_host_path=false），不得放於網站 root。保留完整 Let's Encrypt live/archive/renewal 目錄結構及 symlink；只讓 Certbot 寫入，Nginx 唯讀，私鑰不可公開。
@@ -58,7 +58,7 @@ docker compose --env-file /srv/homefit-secrets/production.env -f compose.product
 docker compose --env-file /srv/homefit-secrets/production.env -f compose.production.yaml exec --user www-data app php artisan config:cache
 ```
 
-- 修改 runtime env（包括 ADMIN_DEMO_ENABLED）不會自動改變既有 container/config cache。recreate app 載入新環境，重建 config cache，再 reload PHP-FPM／recreate app 清除 worker/OPcache 舊值；recreate 後再次確認 cache 值及行為，不輸出秘密。新 app Image 不得攜帶舊 config cache。
+- 修改 runtime env（包括 ADMIN_DEMO_ENABLED）不會自動改變既有 container/config cache。先 recreate app 載入新環境，再於該容器建立 config cache，最後 restart 同一 app 容器清除 FPM／OPcache 舊值。不要在建立 cache 後再次 recreate：bootstrap/cache 未掛 Volume，recreate 會捨棄該 writable layer；restart 保留它，但不能載入新 Compose env。整段操作保持公開入口關閉，重啟後重新核對有效設定及行為，不輸出秘密。新 app Image 不得攜帶舊 config cache；CLI 的 OPcache reset 不能當作 FPM cache 已重置的證據。
 - Demo 關閉後新入口應 503，既有 Demo 管理讀取 403 DEMO_UNAVAILABLE，logout 仍有效。一般 Admin/Member 不受影響；須於部署後重新驗證。
 
 ## 自動續期（部署時建立排程）
@@ -189,3 +189,125 @@ DB無Too many connections、異常長交易或持續鎖等待；FPM不持續排�
 備份、PHP CLI／Artisan、壓縮與Certbot會競爭主機記憶體。exec進app的CLI共用512MiB cgroup，exec進db的dump也共用768MiB；host或其他容器執行則另占主機預算。兩個FPM worker加CLI仍可能超限。維運一次一個重型任務、串流dump／壓縮、避開尖峰；不在Lightsail進行npm／Composer build。Certbot只有192MiB的估計短任務預算，尚未設定硬限制，也不保證實際夠用。
 
 舊原生DB與Docker Lab須依既定備份／退役授權處理，不能三套DB並跑後再靠Swap補救。本輪未做AWS量測、壓力測試、備份或任何服務重建。
+
+## 正式操作 Runbook（2026-10-11，待部署驗證）
+
+以下是逐項審查用流程，不是可直接整段貼上執行的部署腳本。所有 AWS 操作、Migration、匯入、初始化、備份及還原均未在本次執行。每個會寫入的步驟須先核對目標、前一步結果與操作授權；任一步失敗即停止，不自動繼續、不自動重試 mutation。只使用正式獨立 project，Windows 日常 DB、Docker Lab DB／Volumes 都不是部署或還原目標。
+
+### 首次部署：先關閉公開入口，最後才啟用 HTTPS
+
+1. **主機門檻**：授權後核對 Ubuntu／CPU 架構、Static IPv4、DNS A／必要 AAAA、80/443 防火牆與占用者、舊原生／Lab 服務依賴。先確認可捨棄內容及必要備份有效，才依既定計畫退役；不因需要騰 RAM 直接停 DB。配置及驗證 1GB Swap，確認可用磁碟、記憶體與 cgroup；不要同時運行三套 DB。
+2. **版本門檻**：選定完整 40 位 RELEASE_SHA；核對 GHCR app/web 兩份 CI job 都成功、兩張 Image 都可取得，平台符合 linux/amd64 主機。記錄各自 digest、來源 SHA、Compose／deploy 設定版本、MariaDB 實際版本／digest及驗證時間。兩張 Image 的 digest 本來就不同，要求的是來源 SHA 相同。現行 matrix 可部分發佈成功，tag 也不是不可變保證；pull 後核對實際 RepoDigests，若和核准紀錄不符即停止。勿只因 HEAD 更新就假設該 SHA Images 已存在。
+3. **秘密及 Volume 門檻**：runtime 檔位於 repository 外（例 /srv/homefit-secrets/production.env，0600）；確認穩定 APP_KEY、獨立 DB 帳密、ADMIN_DEMO_ENABLED=false、正式 HTTPS／Cookie 設定。僅記非秘密驗證結果。帶齊 readonly PHP／DB／CORS／Nginx 設定；TLS 私有目錄預建。逐一核對 project 及 app_framework、private_files、public_storage、db_data、acme_webroot 實際 Volume 名稱／掛載／所有權；固定 project 名稱不保證 Volume 是新的，若已存在且用途不明則停止，不刪除後重建。
+4. **ACME-only 啟動**：採前文 config --quiet、首次 pull app web db 及 up 指令。這是唯一此流程允許同時準備 DB Image 的首次初始化階段；DB 版本須已核准。確認其他路徑 503、未知 Host 拒絕、app/db 不發布 port；尚不提供公開登入。healthcheck 不是 Schema／資料完整性證明。Migration 前 Laravel health 可能尚未可用，先確認 DB/FPM 及 exec 可用性，不能因此略過 Schema 驗證或刪資料。
+5. **Schema 門檻**：核對容器內 Laravel 實際 DB host=db、port=3306、預期 DB 名稱與受限帳號；不輸出密碼或完整設定。人工確認是全新空的正式 DB、外鍵啟用且使用 InnoDB 後，才單獨執行：
+
+```sh
+# 待部署驗證；--force 只跳過 Laravel production 提示，不替代上述人工目標確認。
+docker compose --env-file /srv/homefit-secrets/production.env -f compose.production.yaml exec --user www-data app php artisan migrate --force
+```
+
+以 migrate:status 與必要唯讀 Schema 查核確認完成。Migration 失敗可能已有部分 DDL 生效，不能假設整批 rollback；不得直接重跑或執行 migrate:fresh。
+
+6. **資料及圖片**：將可信展示包受控傳入 app 的非公開 private_files，給 www-data 必要讀取權限，不放 web root；Host 路徑不會自動成為 container 路徑。以下 package 路徑必須是已確認的容器內路徑，DB placeholder 必須換成實際核對的正式名稱。先單獨預檢，審查成功後才單獨匯入：
+
+```sh
+# 待部署驗證；兩行是兩個人工確認步驟，不可作為失敗仍繼續的批次腳本。
+docker compose --env-file /srv/homefit-secrets/production.env -f compose.production.yaml exec --user www-data app php artisan showcase:import /var/www/html/storage/app/private/showcase-package --database='<verified-production-db>' --check-only
+```
+
+```sh
+docker compose --env-file /srv/homefit-secrets/production.env -f compose.production.yaml exec --user www-data app php artisan showcase:import /var/www/html/storage/app/private/showcase-package --database='<verified-production-db>'
+```
+
+--database 是核對條件，不會切換連線。工具要求目前 migrations 全部完成、十表及受保護業務表均空、FK 啟用、圖片無衝突；無 force／merge／overwrite。核對 10 表611筆、51圖（48商品＋3Banner）、原始 ID／關聯／排序／stock、manifest及逐檔 SHA-256；最終 HTTPS 啟用後再驗 HTTP 圖片。可捕捉例外會補償本次檔案，但斷電／kill 殘留須人工查明，不強制刪除既有圖或反覆匯入。來源封裝及完整性紀錄至少另存一份 Lightsail 外；checksum 不能證明來源可信。確認完成後受控移除部署暫存副本，不刪唯一備份。
+
+7. **Owner**：必須匯入成功後才執行以下現有 production-only 互動指令（保留 TTY，不使用 -T／--no-interaction，不帶密碼參數）：
+
+```sh
+# 待部署驗證；由操作者私下輸入姓名、Email及隱藏密碼，不錄製輸入。
+docker compose --env-file /srv/homefit-secrets/production.env -f compose.production.yaml exec --user www-data app php artisan admin:initialize-production-owner
+```
+
+確認 active Admin 與七個正式 Catalog 關聯；只留去識別結果。有任何既有 Admin 就拒絕，不重設或擴權。不得使用 local/testing 的 admin:bootstrap／admin:provision-owner。Demo 保持關閉；若後續要建立，須另核對安全建立方式、獨立身分與零 grants，不能繞過既有 CLI 的環境限制。首次 Owner 建立後，showcase:import 不再適用於該非空 DB。
+
+8. **Runtime cache**：於最終 runtime／mount／Image 已載入的 app 容器執行前文 config:cache，成功後單獨 restart app（保留 writable layer），等待 FPM／Laravel health 恢復。OPcache validate_timestamps=0，不把 CLI 清 cache 當成 FPM 已刷新。若此後又 recreate app，須於新容器重新 cache 並 restart；不掛載舊版 bootstrap/cache 到新 Image。
+9. **憑證**：依前文 ACME 路徑外網驗證、certbot certonly、fullchain／私鑰目錄及候選 HTTPS nginx -t 流程；確認真實網域及 TLS 鏈，不用自簽憑證冒充正式通過。排程及 renew --dry-run 後續實測須記錄。
+10. **開放門檻**：資料、Owner、有效 config、備份位置、回退方案、資源及健康檢查全部核對後，才切 HFS_NGINX_CONFIG=https.conf 並 recreate web。若首次健康驗證失敗，保持／恢復 ACME-only，不開放登入。
+11. **HTTPS 驗收**：使用合成驗收帳號及受控資料驗會員／Admin登入、me、logout，/sanctum/csrf-cookie 204、同源 /api、Secure／HttpOnly／SameSite及419行為；商品／51圖 HTTP、storage限制、CSRF、Host/SNI、Healthcheck。Demo入口關閉503、既有Demo管理讀取403 DEMO_UNAVAILABLE且logout可用，Owner／Member正常。不得將隔離假FastCGI測試當成此輪正式Laravel驗收。
+
+### 安全更新：Image 與部署設定一起管理
+
+1. 保存上一個已驗證的 app/web SHA、兩個 digest、部署設定版本、DB Image版本及 migrations 清單；秘密只記安全保存位置。留存上一版 Images，避免 rollback 時才發現無法取得。核對新版兩個 Images及平台；不要使用 latest，也不要靠可變 tag 作唯一證據。
+2. 審查新舊 migrations／Schema相容性、環境變數及 mount 差異。無 Schema 變更才走純 app/web 更新；有變更須先訂停止寫入、備份與失敗復原方案，未確認不可開始。現有 Compose db 使用浮動 mariadb:11.4，DB 升級須另行驗證／授權，不納入一般更新。
+3. **受控停止寫入**：可先將公開 web 切回 ACME-only並 recreate web，驗 API／登入503及既有請求已排空；HTTPS 暫不可用是此維護方式的停機代價。Laravel down 只對遵守 maintenance middleware 的請求／特定worker有效，不能阻擋已在途交易、CLI、外部 SQL、排程或其他容器。盤點並暫停所有實際寫入來源，等待進行中交易結束；不假設 queue=sync 代表永遠沒有外部寫入。未證實靜止就不做一致備份或 Migration。
+4. 只於 runtime 私有檔更新 RELEASE_SHA，保留既有 DB／Volume／APP_KEY；先完成 config --quiet及雙 Image 核對。一般版本下載只用：
+
+```sh
+# 待部署驗證；不包含 db，不會主動更新其 Image。
+docker compose --env-file /srv/homefit-secrets/production.env -f compose.production.yaml pull app web
+```
+
+5. 維持 ACME-only，先 recreate app 載入新版 Image／env。若已核准 Schema 變更，此時在停止寫入窗口單獨執行已審查的 migrate --force，核對結果；不可將其當所有更新必跑的無條件步驟。config:cache 成功後再 restart app，保留同一容器快取。下列為分開確認的指令，不建立自動連鎖腳本：
+
+```sh
+docker compose --env-file /srv/homefit-secrets/production.env -f compose.production.yaml up -d --no-deps --force-recreate app
+```
+
+```sh
+docker compose --env-file /srv/homefit-secrets/production.env -f compose.production.yaml exec --user www-data app php artisan config:cache
+```
+
+```sh
+docker compose --env-file /srv/homefit-secrets/production.env -f compose.production.yaml restart app
+```
+
+6. 核對 app health及實際 Image／有效設定；候選新 web Image 用 HTTPS nginx -t，人工確認後切回 HTTPS並 recreate web。開放前後記錄兩服務版本，避免新舊混用。若有使用 artisan down，核對 maintenance driver及共享 app_framework 中的維護狀態，只在全體門檻通過後用 artisan up解除；它不取代入口控制。
+7. 驗證登入／Cookie、商品／storage、後台權限與Demo關閉、Healthcheck及合成資料的Checkout／庫存／訂單一致性；確認無OOM／異常重啟。失敗立即停止、關閉公開寫入入口、保留去秘密Log及狀態，不自動重送Checkout、不為Healthy清資料或Volume。
+
+### 回滾決策：程式回滾不等於資料回復
+
+| 情境 | 允許方向與停止條件 |
+| --- | --- |
+| A：只有 app/web 變更，Schema 向後相容 | 核對上一版仍相容目前資料與 runtime，維護窗口內把 RELEASE_SHA及需要的部署設定恢復到已驗證版本；按更新流程只 recreate app/web、重新 config:cache及 restart app，核對兩個 digest、health與代表性功能。不改 DB Volume。 |
+| B：Migration 已改 Schema | 先核對實際 migrations與部分DDL結果；確認舊版相容才可採A。若不相容，禁止直接回滾Image；先保留現場，提出向前修正或隔離復原方案，等待確認。migrate:rollback 不是預設安全選項。 |
+| C：已有新會員／訂單／庫存異動 | 不可把更新前dump直接覆蓋現有DB。先保護目前資料，在隔離目標分析差異與復原方案；沒有核准資料處理方案就不切換。即使Q30-08不保證訪客資料永久保存，也不等於授權任意覆蓋。 |
+
+DB Image 降版不屬 app/web rollback；不要把舊MariaDB直接掛到較新版寫過的資料目錄。一般回滾禁止 migrate:fresh、db:wipe、down -v、Volume prune及刪除資料。上一版 Compose／bind設定同樣須審查，不將舊資源／秘密設定無條件套回。
+
+### 備份用途及保護範圍
+
+| 用途 | 必要內容與限制 |
+| --- | --- |
+| 初始展示狀態重建（Q30-08最低要求） | 可信展示包10表611筆／51圖／manifest／SHA-256、對應 migrations／Images／設定，以及重新安全初始化Owner的流程。至少一份副本安全保存在Lightsail之外。**不包含訪客會員、訂單、購物車、Owner或後續庫存變動**，不是完整營運備份。 |
+| 正式網站完整復原 | 同一受控窗口的一致DB logical dump、public_storage、必要private_files、原APP_KEY與runtime設定、對應Images/digests／migrations及完整TLS live/archive/renewal資料。含個資及password hash時須加密、限制存取；不能放入公開展示包。此為需完整復原時的操作要求，不新增每日服務或付費資源。 |
+
+- MariaDB 11.4 使用相容的 mariadb-dump／mariadb client，不假設官方Image仍有mysqldump別名。InnoDB可用 --single-transaction --quick取得交易快照並串流輸出；不涵蓋非交易表一致性，期間不可DDL（ALTER／DROP／TRUNCATE等）。核對備份表engine及範圍，不備份不相干資料庫。
+- 最小命令形狀如下，**待部署驗證且不可直接執行placeholder**；須先確認client執行位置、DB目標、權限、私有輸出位置及錯誤傳遞方式。現有Compose沒有掛載下列憑證檔，不可假設host路徑存在於db容器。由操作者準備0600的client option file，秘密不得放命令列／聊天／日誌：
+
+```sh
+mariadb-dump --defaults-extra-file='<private-client.cnf>' --single-transaction --quick '<verified-db-name>'
+```
+
+- 實際執行時串流至非公開受限檔／加密串流，確認dump與壓縮／加密每一階段exit status（Linux pipeline需正確傳遞失敗），不能把零byte或截斷檔當成功。有routines／events等物件須先盤點必要選項；應用表dump不等於DB帳號／grants備份，還原帳號須獨立安全準備。
+- DB快照不包含檔案Transaction。先關閉並排空業務寫入，確認CLI／排程也停止，再取DB及public/private檔案的同一恢復組；不得直接tar正在寫入的db_data當可靠logical backup。private_files僅保留真正需要的資料，匯入暫存／無關備份不盲目套回。
+- APP_KEY需穩定且獨立加密保管，不每次部署重生；完整憑證目錄保留symlink結構、檔權限及私鑰保護。runtime檔、Registry憑證、DB帳密皆不出現在manifest公開摘要。
+- 為備份建立去秘密的恢復組索引：時間、來源release及DB版本、Schema版本、檔案清單／SHA-256、加密方式、異地保管位置及還原結果。Checksum只驗完整性，仍須可信來源與加密；解密材料分開安全保存，不把唯一解密材料留在同一台Lightsail。
+- 不新增每日排程、固定保留週期、付費Snapshot或備份框架。自動化頻率／保留政策可另作後續選項；不能藉此取消Q30-08異地初始展示包及實際還原門檻。
+
+### 隔離還原演練（待授權執行，不覆蓋現況）
+
+1. 明確選擇「初始展示」或「完整復原」，記錄備份來源及日期。先驗checksum、可解密及檔案清單；缺失即停止。不要拿Windows日常DB或Docker展示DB當演練目標。
+2. 建立全新隔離project／network／DB／Volumes及受限帳號；核對實際DB名稱／host／port／權限與mount，不發布公開入口、不共用正式Volume或APP session。完整復原涉及個資時使用私有隔離環境、禁止寄信及排程外呼，證據去識別。
+3. **初始展示**：使用對應Image完成migrations，核對空表，showcase:import先check-only再獨立匯入；還原51圖並核對hash，最後使用production Owner互動流程（需production環境，不繞過限制）。這會建立新的Owner，不是恢復既有Owner。Demo保持false。
+4. **完整復原**：在全新空目標以相容MariaDB client還原經審查的dump及匹配檔案組；先檢查dump內USE／CREATE／DROP等目標指令，防止連到錯誤DB。依原Schema狀態復原，不先無條件migrate後再疊dump。恢復匹配APP_KEY／runtime並重新安全配置DB帳號；不跑showcase:import、不重跑Owner初始化來覆寫既有Admin。Session／cache不盲目復原，採讓使用者重新登入的演練目標；不要共用正式Cookie網域造成Session串用。
+5. 驗證筆數／原ID／FK定義及孤兒檢查、商品庫存mode／variant／primary、51圖或該恢復組所有實檔checksum、必要private檔權限、Schema／auto_increment及Image一致性。代表性讀取、登入、圖片HTTP及合成Cart→Checkout→Cancel須於隔離環境驗證，確認扣／補庫存及快照，不將dump存在或DB可啟動算作還原成功。
+6. 記錄Pass／Fail、restore時間及限制，不記密碼／個資。若有缺圖、SQL失敗或部分殘留，停止並保留來源及現場；不得force匯入、停FK、覆寫既有圖或反覆重跑。重新建立另一個空隔離目標也須精確核對所有權與授權。
+7. 演練通過不等於允許覆蓋正式DB。正式切換另核對演練後的新資料差異及授權；只清理明確屬於本輪隔離資源，不用全域prune。Q30-08正式驗收至少一次實際初始展示還原，仍待Step3／4落實。
+
+### 資源、失敗與公開前最後門檻
+
+- app/web/db硬上限合計1376MiB；Artisan與FPM共用app512MiB，db內dump共用768MiB。主機剩餘672MiB是估算，還含OS／Docker。一次一個重任務，避免備份／壓縮／匯入／Artisan／Certbot同時執行；使用串流，不能把整份dump載入RAM。1GB Swap只是OOM緩衝，不能保證容量。
+- 監看前文docker stats／free／vmstat／OOM／restart／DB連線及磁碟；資源不足、Migration／匯入失敗、health異常時先停止後續操作，阻止新寫入，保留精簡去秘密證據。不得為Healthy任意刪資料／Volume、放寬安全限制或自動重送交易。
+- Step3前必須審查本Runbook、選定實際release pair／設定版本、異地展示包保管方式及還原演練安排、退役清單與備份、秘密安全準備方式；各項「實際完成」證據由Step3／4取得。HTTPS／Cookie、快取重啟、同SHA更新與相容回滾、備份可還原、資源及續期未實測前不可宣告正式部署通過。
+- 本次僅文件補齊；未增加腳本、每日服務或新決策，未操作AWS／Docker／DB／DNS／GHCR。
