@@ -184,7 +184,7 @@ class AdminUserApiTest extends TestCase
         foreach (app('router')->getRoutes() as $route) {
             if (! str_starts_with($route->uri(), 'api/admin/users')) continue;
             $paths[$route->uri()] = $route->methods();
-            $this->assertSame(['api', 'auth:admin', 'admin.active', 'admin.permission:member_manage'], $route->gatherMiddleware());
+            $this->assertSame(['api', 'admin.demo-access', 'auth:admin', 'admin.active', 'admin.permission:member_manage'], $route->gatherMiddleware());
             if (str_contains($route->uri(), '{id}')) $this->assertSame('[0-9]+', $route->wheres['id']);
         }
         $this->assertSame(['api/admin/users' => ['GET', 'HEAD'], 'api/admin/users/{id}' => ['GET', 'HEAD'], 'api/admin/users/{id}/status' => ['PATCH']], $paths);

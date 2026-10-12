@@ -372,6 +372,6 @@ class AdminBannerApiTest extends TestCase
         $this->patchJson('/api/admin/banners/999/status', ['status' => 'active'])->assertNotFound();
         $routes = collect(app('router')->getRoutes())->filter(fn ($r) => str_starts_with($r->uri(), 'api/admin/banners'));
         $this->assertCount(6, $routes);
-        foreach ($routes as $route) $this->assertSame(['api', 'auth:admin', 'admin.active', 'admin.permission:home_content_manage'], $route->gatherMiddleware());
+        foreach ($routes as $route) $this->assertSame(['api', 'admin.demo-access', 'auth:admin', 'admin.active', 'admin.permission:home_content_manage'], $route->gatherMiddleware());
     }
 }

@@ -20,7 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // Banner link validation must see controls before its own space-only trim.
         $middleware->trimStrings(except: ['link_url']);
         $middleware->redirectGuestsTo(
-            fn (Request $request) => $request->is('api/admin/*') ? null : route('login'),
+            fn (Request $request) => $request->is('api/*') ? null : route('login'),
         );
         $middleware->alias([
             'member.active' => EnsureMemberIsActive::class,

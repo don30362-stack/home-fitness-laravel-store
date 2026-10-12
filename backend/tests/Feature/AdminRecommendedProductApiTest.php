@@ -249,7 +249,7 @@ class AdminRecommendedProductApiTest extends TestCase
     {
         $routes = collect(app('router')->getRoutes())->filter(fn ($r) => str_starts_with($r->uri(), 'api/admin/recommended-products'));
         $this->assertCount(4, $routes);
-        foreach ($routes as $route) $this->assertSame(['api', 'auth:admin', 'admin.active', 'admin.permission:home_content_manage'], $route->gatherMiddleware());
+        foreach ($routes as $route) $this->assertSame(['api', 'admin.demo-access', 'auth:admin', 'admin.active', 'admin.permission:home_content_manage'], $route->gatherMiddleware());
         $this->login(); $this->patchJson('/api/admin/recommended-products/1/status', ['status' => 'active'])->assertNotFound();
         $this->getJson('/api/admin/product-selector')->assertNotFound();
     }
