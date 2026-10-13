@@ -21,23 +21,25 @@ Demo 可瀏覽 Dashboard、商品、分類、庫存及首頁內容，不能新�
 ![商品詳細頁：圖片、規格、庫存、數量與加入購物車](docs/images/portfolio/storefront-product-detail-desktop.png)
 
 <details>
-<summary>查看商品列表、手機購物車、訂單與唯讀後台</summary>
+<summary>查看首頁、商品列表、手機購物車、訂單與唯讀後台</summary>
+
+**首頁品牌與商品展示｜正式網站**
+
+![首頁：品牌主視覺與居家訓練商品展示](docs/images/portfolio/storefront-home-desktop.png)
 
 **商品搜尋與分類｜正式網站**
 
 ![桌機商品列表：搜尋、分類、商品圖片與價格](docs/images/portfolio/storefront-products-desktop.png)
 
-**手機購物車｜本機隔離展示資料**
+**手機購物車｜正式網站｜測試購物車**
 
-使用真正的 Vue 購物車頁面與合成資料，呈現 390px 寬度下的商品、數量及金額摘要。
+<img src="docs/images/portfolio/storefront-cart-mobile.png" alt="手機購物車：正式網站的測試購物車" width="390">
 
-<img src="docs/images/portfolio/storefront-cart-mobile.png" alt="390px 手機購物車，本機隔離展示資料" width="390">
+**訂單詳細｜正式網站｜測試帳號與測試訂單**
 
-**訂單詳細｜本機隔離展示資料**
+畫面使用可公開的測試資料，不代表真實商業交易。
 
-使用真正的 Vue 訂單頁與本機合成訂單，展示訂單狀態、商品快照及金額；未在正式網站建立訂單。
-
-![訂單詳細：狀態、商品快照及總額，本機隔離展示資料](docs/images/portfolio/storefront-order-detail-desktop.png)
+![訂單詳細：正式網站的測試帳號與測試訂單](docs/images/portfolio/storefront-order-detail-desktop.png)
 
 **唯讀後台商品管理｜正式公開 Demo**
 
