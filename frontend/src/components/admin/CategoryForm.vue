@@ -76,30 +76,30 @@ const submit = async () => {
     <div v-if="error" class="alert alert-danger" role="alert">{{ error }}</div>
     <div class="mb-3">
       <label for="category-name" class="form-label">名稱</label>
-      <input id="category-name" v-model="name" class="form-control" maxlength="100" :disabled="submitting" />
-      <p v-for="message in errors.name" :key="message" class="text-danger mb-0">{{ message }}</p>
+      <input id="category-name" v-model="name" class="form-control" maxlength="100" :disabled="submitting" :aria-invalid="!!errors.name" :aria-describedby="errors.name ? 'category-name-error' : undefined">
+      <div v-if="errors.name" id="category-name-error"><p v-for="message in errors.name" :key="message" class="text-danger mb-0">{{ message }}</p></div>
     </div>
     <div v-if="role === 'child'" class="mb-3">
       <label for="category-parent" class="form-label">主分類</label>
-      <select id="category-parent" v-model="parentId" class="form-select" :disabled="submitting">
+      <select id="category-parent" v-model="parentId" class="form-select" :disabled="submitting" :aria-invalid="!!errors.parent_id" :aria-describedby="errors.parent_id ? 'category-parent-error' : undefined">
         <option value="">請選擇主分類</option>
         <option v-for="parent in parents" :key="parent.id" :value="parent.id">
           {{ parent.name }}{{ parent.status === 'inactive' ? '（目前停用，可保留）' : '' }}
         </option>
       </select>
-      <p v-for="message in errors.parent_id" :key="message" class="text-danger mb-0">{{ message }}</p>
+      <div v-if="errors.parent_id" id="category-parent-error"><p v-for="message in errors.parent_id" :key="message" class="text-danger mb-0">{{ message }}</p></div>
     </div>
     <div class="mb-3">
       <label for="category-sort" class="form-label">排序</label>
-      <input id="category-sort" v-model="sortOrder" type="number" min="0" step="1" class="form-control" :disabled="submitting" />
-      <p v-for="message in errors.sort_order" :key="message" class="text-danger mb-0">{{ message }}</p>
+      <input id="category-sort" v-model="sortOrder" type="number" min="0" step="1" class="form-control" :disabled="submitting" :aria-invalid="!!errors.sort_order" :aria-describedby="errors.sort_order ? 'category-sort-error' : undefined">
+      <div v-if="errors.sort_order" id="category-sort-error"><p v-for="message in errors.sort_order" :key="message" class="text-danger mb-0">{{ message }}</p></div>
     </div>
     <div v-if="!category" class="mb-3">
       <label for="category-initial-status" class="form-label">建立時的初始狀態</label>
-      <select id="category-initial-status" v-model="status" class="form-select" :disabled="submitting">
+      <select id="category-initial-status" v-model="status" class="form-select" :disabled="submitting" :aria-invalid="!!errors.status" :aria-describedby="errors.status ? 'category-initial-status-error' : undefined">
         <option value="active">啟用</option><option value="inactive">停用</option>
       </select>
-      <p v-for="message in errors.status" :key="message" class="text-danger mb-0">{{ message }}</p>
+      <div v-if="errors.status" id="category-initial-status-error"><p v-for="message in errors.status" :key="message" class="text-danger mb-0">{{ message }}</p></div>
     </div>
     <div class="d-flex flex-wrap gap-2">
       <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '儲存中…' : '儲存分類' }}</button>

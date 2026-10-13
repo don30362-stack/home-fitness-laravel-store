@@ -910,7 +910,15 @@ for (const [status, code, expected] of [[401, undefined, '帳號或密碼錯誤'
       return Promise.reject(error)
     }
     const view = await mount(); await view.submit(); await settle()
-    assert.ok(text(view.root).includes(expected)); if (status === 422) assert.ok(text(view.root).includes('密碼欄位錯誤'))
+    assert.ok(text(view.root).includes(expected)); if (status === 422) {
+      assert.ok(text(view.root).includes('密碼欄位錯誤'))
+      for (const field of ['email', 'password']) {
+        const input = find(view.root, el => el.props.id === 'admin-' + field)
+        assert.equal(input.props['aria-invalid'], true)
+        assert.equal(input.props['aria-describedby'], 'admin-' + field + '-error')
+        assert.ok(find(view.root, el => el.props.id === input.props['aria-describedby']))
+      }
+    }
     assert.deepEqual(nav, []); assert.equal(auth.currentAdmin.id, admin.id); assert.equal(calls.length, 2)
     assertMemberUntouched(); view.app.unmount()
   })
@@ -1630,7 +1638,7 @@ for(const status of [403,419,undefined,500,422]){
   api.defaults.adapter=config=>{calls.push(config);return config.url==='/categories'?Promise.resolve(response(config,{data:categoryOptions})):Promise.reject(failure(config,status))};const view=await inventoryView();assert.ok(find(view.root,el=>el.props.role==='alert'));assert.equal(auth.currentAdmin.id,admin.id);assert.equal(view.router.currentRoute.value.name,'admin-inventory');assert.equal(calls.filter(c=>c.url==='/admin/inventory').length,1);api.defaults.adapter=inventoryAdapter();await click(view,'重試');assert.ok(text(view.root).includes('庫存啞鈴'));assertInventoryCalls();view.app.unmount()
  })
  test(`Inventory PATCH ${status??'network'}保留stock、不retry、不清member`,async()=>{
-  api.defaults.adapter=async config=>{calls.push(config);if(config.method==='patch'){const e=failure(config,status);if(status===422)e.response.data.errors={adjustment:['調整後庫存不可小於 0']};throw e}return response(config,config.url==='/categories'?{data:categoryOptions}:productPage([inventoryItem]))};const view=await inventoryView();await click(view,'調整庫存');await inputValue(view,'inventory-adjustment','-99');await submitAdjustment(view);assert.ok(text(inventoryPanel(view)).includes('目前庫存：3'));if(status===422)assert.ok(text(view.root).includes('調整後庫存不可小於 0'));assert.ok(find(view.root,el=>el.props.role==='alert'));assert.equal(calls.filter(c=>c.method==='patch').length,1);assert.equal(auth.currentAdmin.id,admin.id);assert.equal(auth.adminFailureReason,null);assert.equal(view.router.currentRoute.value.name,'admin-inventory');assertInventoryCalls();view.app.unmount()
+  api.defaults.adapter=async config=>{calls.push(config);if(config.method==='patch'){const e=failure(config,status);if(status===422)e.response.data.errors={adjustment:['調整後庫存不可小於 0']};throw e}return response(config,config.url==='/categories'?{data:categoryOptions}:productPage([inventoryItem]))};const view=await inventoryView();await click(view,'調整庫存');await inputValue(view,'inventory-adjustment','-99');await submitAdjustment(view);assert.ok(text(inventoryPanel(view)).includes('目前庫存：3'));if(status===422){assert.ok(text(view.root).includes('調整後庫存不可小於 0'));const field=find(view.root,el=>el.props.id==='inventory-adjustment');assert.equal(field.props['aria-invalid'],true);assert.equal(field.props['aria-describedby'],'inventory-adjustment-error');}assert.ok(find(view.root,el=>el.props.role==='alert'));assert.equal(calls.filter(c=>c.method==='patch').length,1);assert.equal(auth.currentAdmin.id,admin.id);assert.equal(auth.adminFailureReason,null);assert.equal(view.router.currentRoute.value.name,'admin-inventory');assertInventoryCalls();view.app.unmount()
  })
 }
 for(const [status,code]of [[401,undefined],[403,'ADMIN_ACCOUNT_DISABLED']])for(const phase of ['get','patch'])test(`Inventory ${phase} ${status}/${code??''}Admin coordinator/member隔離`,async()=>{
@@ -1864,6 +1872,9 @@ for (const [role, field, reason] of [['root', 'name', '主分類名稱重複'], 
     await inputValue(view, 'category-name', '保留草稿'); if (role === 'child') await inputValue(view, 'category-parent', '4')
     await submitCategory(view)
     assert.ok(text(view.root).includes(reason)); assert.equal(find(view.root, el => el.props.id === 'category-name').value, '保留草稿')
+    const errorInput = find(view.root, el => el.props.id === (field === 'name' ? 'category-name' : 'category-parent'))
+    assert.equal(errorInput.props['aria-invalid'], true)
+    assert.ok(find(view.root, el => el.props.id === errorInput.props['aria-describedby']))
     assert.equal(mutations().length, 1); assert.equal(calls.filter(c => c.method === 'get').length, 1)
     assertCategoryMutationBoundary(); view.app.unmount()
   })
@@ -3160,3 +3171,18 @@ test('Dashboard renders five backend recent rows in supplied order and all exist
   }
   assert.equal(calls.length, 1); dashboardBoundary(); view.app.unmount()
 })
+
+
+for (const [path, link, current] of [['/admin/products','products','page'],['/admin/products/1','products','location'],['/admin/orders/1','orders','location']]) {
+  test('Workspace current navigation follows deep route ' + path, async () => {
+    auth.isAdminInitialized=true;auth.currentAdmin={...admin,permissions:routes.adminModules.flatMap(m=>m.permission?[m.permission]:[])}
+    const view=await mountRoute(path)
+    const active=find(view.root,el=>el.type==='a'&&el.props.href==='/admin/'+link)
+    assert.equal(active.props['aria-current'],current)
+    for(const module of routes.adminModules.filter(m=>m.path!==link)) {
+      const other=find(view.root,el=>el.type==='a'&&el.props.href==='/admin/'+module.path)
+      assert.equal(other.props['aria-current'],undefined)
+    }
+    assertMemberUntouched();view.app.unmount()
+  })
+}

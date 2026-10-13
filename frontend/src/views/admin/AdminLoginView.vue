@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
+import '@/assets/admin.css'
+import logoUrl from '@/assets/images/brand/logo-s2.png'
 import axios from 'axios'
 import type { ApiErrorResponse } from '@/types/api'
 import { useAdminAuthStore } from '@/stores/adminAuth'
@@ -69,27 +71,37 @@ const retryRestore = async () => {
 </script>
 
 <template>
-  <section class="admin-login container py-5" style="max-width: 480px">
-    <h1 class="h3 mb-4">管理員登入</h1>
-    <button type="button" class="btn btn-outline-primary w-100 mb-3" :disabled="submitting" @click="enterDemo">進入唯讀Demo</button>
-    <div v-if="auth.restoreError" class="alert alert-warning" role="alert">
-      {{ auth.restoreError }}
-      <button type="button" class="btn btn-sm btn-outline-dark ms-2" :disabled="auth.isRestoring" @click="retryRestore">重試</button>
+  <section class="admin-login">
+    <div class="admin-login-panel">
+      <a href="/" class="admin-login-brand" aria-label="Home Fit，返回前台"><img :src="logoUrl" alt="Home Fit" width="851" height="609"></a>
+      <p class="admin-eyebrow">HOME FIT · ADMIN WORKSPACE</p>
+      <h1 class="h3 mb-2">管理員登入</h1>
+      <p class="admin-login-description">登入管理工作台，處理商品與已授權的營運事項。</p>
+      <div v-if="auth.restoreError" class="alert alert-warning" role="alert">
+        {{ auth.restoreError }}
+        <button type="button" class="btn btn-sm btn-outline-dark ms-2" :disabled="auth.isRestoring" @click="retryRestore">重試</button>
+      </div>
+      <div v-if="auth.adminFailureMessage" class="alert alert-warning" role="alert">{{ auth.adminFailureMessage }}</div>
+      <div v-if="loginError" class="alert alert-danger" role="alert">{{ loginError }}</div>
+      <form @submit.prevent="submit">
+        <div class="mb-3">
+          <label for="admin-email" class="form-label">Email</label>
+          <input id="admin-email" v-model="form.email" type="email" autocomplete="username" class="form-control" :disabled="submitting" :aria-invalid="!!fieldErrors.email" :aria-describedby="fieldErrors.email ? 'admin-email-error' : undefined" required>
+          <div v-if="fieldErrors.email" id="admin-email-error" class="text-danger small mt-2"><p v-for="message in fieldErrors.email" :key="message" class="mb-0">{{ message }}</p></div>
+        </div>
+        <div class="mb-3">
+          <label for="admin-password" class="form-label">Password</label>
+          <input id="admin-password" v-model="form.password" type="password" autocomplete="current-password" class="form-control" :disabled="submitting" :aria-invalid="!!fieldErrors.password" :aria-describedby="fieldErrors.password ? 'admin-password-error' : undefined" required>
+          <div v-if="fieldErrors.password" id="admin-password-error" class="text-danger small mt-2"><p v-for="message in fieldErrors.password" :key="message" class="mb-0">{{ message }}</p></div>
+        </div>
+        <button type="submit" class="btn btn-primary w-100" :disabled="submitting">{{ submitting ? '登入中…' : '登入' }}</button>
+      </form>
+      <section class="admin-demo-entry" aria-labelledby="admin-demo-title">
+        <h2 id="admin-demo-title" class="h6">先探索管理工作台</h2>
+        <p class="small text-muted">唯讀 Demo 僅供瀏覽商品與展示資料，不能新增、修改或刪除。</p>
+        <button type="button" class="btn btn-outline-primary w-100" :disabled="submitting" @click="enterDemo">進入唯讀Demo</button>
+      </section>
+      <a href="/" class="admin-login-return">返回前台網站 <span aria-hidden="true">↗</span></a>
     </div>
-    <div v-if="auth.adminFailureMessage" class="alert alert-warning" role="alert">{{ auth.adminFailureMessage }}</div>
-    <div v-if="loginError" class="alert alert-danger" role="alert">{{ loginError }}</div>
-    <form @submit.prevent="submit">
-      <div class="mb-3">
-        <label for="admin-email" class="form-label">Email</label>
-        <input id="admin-email" v-model="form.email" type="email" autocomplete="username" class="form-control" :disabled="submitting" required>
-        <div v-for="message in fieldErrors.email" :key="message" class="text-danger small">{{ message }}</div>
-      </div>
-      <div class="mb-3">
-        <label for="admin-password" class="form-label">Password</label>
-        <input id="admin-password" v-model="form.password" type="password" autocomplete="current-password" class="form-control" :disabled="submitting" required>
-        <div v-for="message in fieldErrors.password" :key="message" class="text-danger small">{{ message }}</div>
-      </div>
-      <button type="submit" class="btn btn-primary w-100" :disabled="submitting">{{ submitting ? '登入中…' : '登入' }}</button>
-    </form>
   </section>
 </template>

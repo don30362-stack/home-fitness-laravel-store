@@ -229,13 +229,15 @@ onBeforeUnmount(() => {
         <label for="inventory-adjustment" class="form-label">增減數量（例如 +5 或 -3）</label>
         <input
           id="inventory-adjustment"
+          :aria-invalid="!!adjustmentError"
+          :aria-describedby="adjustmentError ? 'inventory-adjustment-error' : undefined"
           v-model="adjustment"
           class="form-control mb-2"
           type="number"
           step="1"
           :disabled="submitting"
         />
-        <p v-if="adjustmentError" role="alert" class="text-danger">{{ adjustmentError }}</p>
+        <p v-if="adjustmentError" id="inventory-adjustment-error" role="alert" class="text-danger">{{ adjustmentError }}</p>
         <button type="submit" class="btn btn-primary me-2" :disabled="submitting">
           {{ submitting ? '調整中…' : '確認調整' }}
         </button>
