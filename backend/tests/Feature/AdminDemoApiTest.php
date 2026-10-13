@@ -207,6 +207,37 @@ class AdminDemoApiTest extends TestCase
         $this->assertGuest('admin');
     }
 
+    public function test_demo_logout_blocks_subsequent_admin_reads_and_preserves_member_session(): void
+    {
+        $demo = $this->demo();
+        $member = User::factory()->create(['password' => 'member-secret']);
+        $nextRequest = function (): void {
+            $this->withCredentials()->withCookie(config('session.cookie'), app('session.store')->getId());
+            app('session.store')->flush();
+            Auth::forgetGuards();
+            // Reload identity from the session cookie, not a cached actingAs guard.
+            Auth::shouldUse('web');
+        };
+
+        $this->postJson('/api/login', ['email' => $member->email, 'password' => 'member-secret'])->assertOk();
+        $nextRequest();
+        $this->getJson('/api/me')->assertOk()->assertJsonPath('data.id', $member->id);
+        $nextRequest();
+        $this->postJson('/api/admin/demo')->assertOk()->assertJsonPath('data.id', $demo->id);
+        $nextRequest();
+        $this->getJson('/api/admin/me')->assertOk()->assertJsonPath('data.is_demo', true);
+        $nextRequest();
+        $this->postJson('/api/admin/logout')->assertOk();
+        $nextRequest();
+        $this->getJson('/api/admin/me')->assertUnauthorized();
+        $nextRequest();
+        $this->getJson('/api/admin/products')->assertUnauthorized();
+        $nextRequest();
+        $this->getJson('/api/me')->assertOk()->assertJsonPath('data.id', $member->id);
+        $this->assertAuthenticatedAs($member, 'web');
+        $this->assertGuest('admin');
+    }
+
     public function test_owner_is_not_replaced_and_normal_zero_permission_admin_is_not_demo(): void
     {
         $this->demo();
