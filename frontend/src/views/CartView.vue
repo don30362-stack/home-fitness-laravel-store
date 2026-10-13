@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppConfirmDialog from '@/components/common/AppConfirmDialog.vue'
+import AppNotice from '@/components/common/AppNotice.vue'
 import { computed, ref } from 'vue'
 import { isAxiosError } from 'axios'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -18,6 +20,8 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const cartStore = useCartStore()
+
+const confirmDialog = ref<InstanceType<typeof AppConfirmDialog> | null>(null)
 
 const processingItemKey = ref<string | null>(null)
 const isClearingCart = ref(false)
@@ -202,63 +206,51 @@ const increaseItem = (item: DisplayCartItem) => {
 const removeItem = async (
     item: DisplayCartItem,
 ) => {
-    const shouldRemove = window.confirm(
-        `確定要移除「${item.product.name}」嗎？`,
-    )
+    void confirmDialog.value?.ask({ title: '移除商品', description: `確定要移除「${item.product.name}」嗎？移除後可重新加入。`, confirmLabel: '移除商品' }, async () => {
+        const key = getItemKey(item)
 
-    if (!shouldRemove) {
-        return
-    }
+        processingItemKey.value = key
+        clearActionMessage()
 
-    const key = getItemKey(item)
+        try {
+            if ('id' in item) {
+                await cartStore.removeMemberItem(item.id)
+            } else {
+                cartStore.removeGuestItem(item.key)
+            }
 
-    processingItemKey.value = key
-    clearActionMessage()
-
-    try {
-        if ('id' in item) {
-            await cartStore.removeMemberItem(item.id)
-        } else {
-            cartStore.removeGuestItem(item.key)
+            actionSuccessMessage.value =
+                '商品已從購物車移除。'
+        } catch (error) {
+            actionErrorMessage.value =
+                getActionErrorMessage(error)
+        } finally {
+            processingItemKey.value = null
         }
-
-        actionSuccessMessage.value =
-            '商品已從購物車移除。'
-    } catch (error) {
-        actionErrorMessage.value =
-            getActionErrorMessage(error)
-    } finally {
-        processingItemKey.value = null
-    }
+    })
 }
 
 const clearCart = async () => {
-    const shouldClear = window.confirm(
-        '確定要清空購物車嗎？',
-    )
+    void confirmDialog.value?.ask({ title: '清空購物車', description: '確定要清空所有商品嗎？此操作不會建立訂單。', confirmLabel: '清空購物車' }, async () => {
+        isClearingCart.value = true
+        clearActionMessage()
 
-    if (!shouldClear) {
-        return
-    }
+        try {
+            if (authStore.isAuthenticated) {
+                await cartStore.clearMemberCart()
+            } else {
+                cartStore.clearGuestCart()
+            }
 
-    isClearingCart.value = true
-    clearActionMessage()
-
-    try {
-        if (authStore.isAuthenticated) {
-            await cartStore.clearMemberCart()
-        } else {
-            cartStore.clearGuestCart()
+            actionSuccessMessage.value =
+                '購物車已清空。'
+        } catch (error) {
+            actionErrorMessage.value =
+                getActionErrorMessage(error)
+        } finally {
+            isClearingCart.value = false
         }
-
-        actionSuccessMessage.value =
-            '購物車已清空。'
-    } catch (error) {
-        actionErrorMessage.value =
-            getActionErrorMessage(error)
-    } finally {
-        isClearingCart.value = false
-    }
+    })
 }
 
 const removeCartSyncQuery = async () => {
@@ -292,26 +284,20 @@ const retryCartSync = async () => {
 }
 
 const discardGuestCart = async () => {
-    const shouldDiscard = window.confirm(
-        '確定要放棄尚未合併的訪客購物車嗎？',
-    )
+    void confirmDialog.value?.ask({ title: '放棄訪客購物車', description: '尚未合併的訪客商品將從本機清除，不影響會員購物車。', confirmLabel: '確認放棄' }, async () => {
+        cartStore.clearGuestCart()
+        await removeCartSyncQuery()
 
-    if (!shouldDiscard) {
-        return
-    }
-
-    cartStore.clearGuestCart()
-    await removeCartSyncQuery()
-
-    actionSuccessMessage.value =
-        '未合併的訪客購物車已清除。'
+        actionSuccessMessage.value =
+            '未合併的訪客購物車已清除。'
+    })
 }
 </script>
 
 <template>
     <div class="container py-5 hf-functional-page hf-cart-page">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
-            <div class="hf-page-heading mb-0"><p class="hf-eyebrow">YOUR TRAINING KIT</p><h1 class="h2 mb-0">購物車</h1></div>
+            <div class="hf-page-heading mb-0"><p class="hf-eyebrow">YOUR TRAINING KIT</p><h1 id="cart-heading" tabindex="-1" class="h2 mb-0">購物車</h1></div>
 
             <div class="d-flex align-items-center gap-3">
                 <span class="text-muted">
@@ -325,13 +311,13 @@ const discardGuestCart = async () => {
             </div>
         </div>
 
-        <div v-if="hasCartSyncFailed" class="alert alert-warning" role="alert">
+        <AppNotice v-if="hasCartSyncFailed" tone="warning" title="購物車尚未同步">
             <p class="mb-3">
                 登入成功，但購物車同步失敗。訪客購物車資料仍然保留。
             </p>
 
             <div class="d-flex flex-wrap gap-2">
-                <button type="button" class="btn btn-warning btn-sm" :disabled="isRetryingSync" @click="retryCartSync">
+                <button type="button" class="btn btn-outline-dark btn-sm" :disabled="isRetryingSync" @click="retryCartSync">
                     {{
                         isRetryingSync
                             ? '重新同步中...'
@@ -344,15 +330,15 @@ const discardGuestCart = async () => {
                     放棄訪客購物車
                 </button>
             </div>
-        </div>
+        </AppNotice>
 
-        <div v-if="actionSuccessMessage" class="alert alert-success" role="alert">
+        <AppNotice v-if="actionSuccessMessage" tone="success">
             {{ actionSuccessMessage }}
-        </div>
+        </AppNotice>
 
-        <div v-if="actionErrorMessage" class="alert alert-danger" role="alert">
+        <AppNotice v-if="actionErrorMessage" tone="error">
             {{ actionErrorMessage }}
-        </div>
+        </AppNotice>
 
         <div v-if="isCartLoading" class="py-5 text-center text-muted">
             購物車載入中...
@@ -498,9 +484,9 @@ const discardGuestCart = async () => {
                             </span>
                         </div>
 
-                        <div v-if="hasUnavailableItems" class="alert alert-warning small" role="alert">
+                        <AppNotice v-if="hasUnavailableItems" tone="warning" title="請先調整商品">
                             購物車內有目前無法購買的商品，請調整後再結帳。
-                        </div>
+                        </AppNotice>
 
                         <RouterLink v-if="canCheckout" :to="{ name: 'checkout' }" class="btn btn-dark w-100">
                             前往結帳
@@ -513,6 +499,7 @@ const discardGuestCart = async () => {
                 </div>
             </aside>
         </div>
+        <AppConfirmDialog ref="confirmDialog" fallback-focus="#cart-heading" />
     </div>
 </template>
 

@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import AppConfirmDialog from '@/components/common/AppConfirmDialog.vue'
+import AppNotice from '@/components/common/AppNotice.vue'
 import { getAddresses, setDefaultAddress, deleteAddress } from '@/services/addressService';
 import type { UserAddress } from '@/types/address';
 import { computed, ref, onBeforeUnmount, onMounted } from 'vue';
 import UserAddressForm from '@/components/member/UserAddressForm.vue';
+
+const confirmDialog = ref<InstanceType<typeof AppConfirmDialog> | null>(null)
 
 const addresses = ref<UserAddress[]>([])
 const isLoading = ref(true)
@@ -96,37 +100,32 @@ const handleDelete = async (address: UserAddress) => {
         return
     }
 
-    const confirmed = window.confirm(
-        `確定要刪除「${address.label}」嗎？`
-    )
+    void confirmDialog.value?.ask({ title: '刪除地址', description: `確定要刪除「${address.label}」嗎？此操作不會更改已建立訂單的收件資訊。`, confirmLabel: '刪除地址' }, async () => {
+        if (mutationBlocked.value || disposed) return
+        successMessage.value = ''
+        errorMessage.value = ''
+        processingAddressId.value = address.id
 
-    if (!confirmed) {
-        return
-    }
+        try {
+            const response = await deleteAddress(address.id)
 
-    successMessage.value = ''
-    errorMessage.value = ''
-    processingAddressId.value = address.id
+            if (disposed) return
+            if (selectedAddress.value?.id === address.id) {
+                isFormVisible.value = false
+                selectedAddress.value = null
+            }
 
-    try {
-        const response = await deleteAddress(address.id)
+            successMessage.value = response.message
+            refreshNeeded.value = true
 
-        if (disposed) return
-        if (selectedAddress.value?.id === address.id) {
-            isFormVisible.value = false
-            selectedAddress.value = null
+            await loadAddresses()
+        } catch {
+            if (disposed) return
+            errorMessage.value = '地址刪除失敗，請稍後再試'
+        } finally {
+            if (!disposed) processingAddressId.value = null
         }
-
-        successMessage.value = response.message
-        refreshNeeded.value = true
-
-        await loadAddresses()
-    } catch {
-        if (disposed) return
-        errorMessage.value = '地址刪除失敗，請稍後再試'
-    } finally {
-        if (!disposed) processingAddressId.value = null
-    }
+    })
 }
 
 onMounted(() => { loadAddresses() })
@@ -135,16 +134,16 @@ onMounted(() => { loadAddresses() })
 <template>
     <section>
         <div class="d-flex flex-wrap gap-3 justify-content-between align-items-center mb-4">
-            <h2 class="h4 mb-0">地址簿</h2>
+            <h2 id="addresses-heading" tabindex="-1" class="h4 mb-0">地址簿</h2>
 
             <button v-if="!isFormVisible" type="button" class="btn btn-dark" :disabled="mutationBlocked" @click="openCreateForm">
                 新增地址
             </button>
         </div>
 
-        <div v-if="successMessage" class="alert alert-success" role="alert">
+        <AppNotice v-if="successMessage" tone="success">
             {{ successMessage }}
-        </div>
+        </AppNotice>
 
         <UserAddressForm v-if="isFormVisible" :address="selectedAddress" :disabled="refreshNeeded || isLoading || processingAddressId !== null" @submitting-change="formSubmitting = $event" @saved="handleSaved" @cancel="closeForm" />
 
@@ -153,12 +152,12 @@ onMounted(() => { loadAddresses() })
             <p class="text-muted mt-3 mb-0">地址資料載入中...</p>
         </div>
 
-        <div v-else-if="errorMessage" class="alert alert-danger" role="alert">
+        <AppNotice v-else-if="errorMessage" :tone="successMessage ? 'warning' : 'error'" :title="successMessage ? '清單需要重新載入' : '地址操作未完成'">
             <p class="mb-2">{{ errorMessage }}</p>
             <button @click="loadAddresses" type="button" class="btn btn-sm btn-outline-danger">
                 重新載入
             </button>
-        </div>
+        </AppNotice>
 
         <div v-else-if="addresses.length === 0" class="card">
             <div class="card-body py-5 text-center">
@@ -214,5 +213,6 @@ onMounted(() => { loadAddresses() })
                 </article>
             </div>
         </div>
+        <AppConfirmDialog ref="confirmDialog" fallback-focus="#addresses-heading" />
     </section>
 </template>

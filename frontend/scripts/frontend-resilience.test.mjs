@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { createServer } from 'vite'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
-import { createRenderer, nextTick, h } from 'vue'
+import { createRenderer, nextTick, h, markRaw } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 
@@ -13,9 +13,17 @@ globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} }
 const originalShadowRoot = globalThis.ShadowRoot
 const originalWindow = globalThis.window
 const originalDocument = globalThis.Document
+const originalLowerDocument = globalThis.document
+const originalHTMLElement = globalThis.HTMLElement
+class FixtureElement { isConnected = true; matches() { return false }; focus() { globalThis.document.activeElement = this } }
+globalThis.HTMLElement = FixtureElement
+globalThis.document = { activeElement: null, querySelector: () => null }
 globalThis.Document = class Document {}
 globalThis.ShadowRoot = class ShadowRoot {}
 const files = {
+  'virtual:confirm': '/src/components/common/AppConfirmDialog.vue',
+  'virtual:notice': '/src/components/common/AppNotice.vue',
+  'virtual:cart': '/src/views/CartView.vue',
   'virtual:member': '/src/views/MemberView.vue',
   'virtual:detail': '/src/views/ProductDetailView.vue',
   'virtual:category': '/src/components/product/ProductCategoryNav.vue',
@@ -34,6 +42,8 @@ const server = await createServer({
       enforce: 'pre',
       resolveId(id) {
         if (id in files) return '\0' + id + '.ts'
+        if (id.endsWith('/AppConfirmDialog.vue')) return '\0virtual:confirm.ts'
+        if (id.endsWith('/AppNotice.vue')) return '\0virtual:notice.ts'
         if (id.endsWith('/UserAddressForm.vue')) return '\0virtual:addressform.ts'
         if (id.endsWith('.vue')) return '\0virtual:blank.ts'
       },
@@ -62,7 +72,7 @@ const { default: api } = await server.ssrLoadModule('/src/services/api.ts')
 const { useCartStore } = await server.ssrLoadModule('/src/stores/cart.ts')
 const { parseGuestCart } = await server.ssrLoadModule('/src/utils/guestCartStorage.ts')
 const components = {}
-for (const name of ['detail', 'category', 'addressform', 'addresses', 'checkout'])
+for (const name of ['detail', 'category', 'addressform', 'addresses', 'checkout', 'cart', 'confirm', 'notice'])
   components[name] = (await server.ssrLoadModule('virtual:' + name)).default
 const requests = []
 let handler
@@ -88,15 +98,22 @@ after(async () => {
   else globalThis.localStorage = originalStorage
   if (originalDocument === undefined) delete globalThis.Document
   else globalThis.Document = originalDocument
+  if (originalLowerDocument === undefined) delete globalThis.document; else globalThis.document = originalLowerDocument
+  if (originalHTMLElement === undefined) delete globalThis.HTMLElement; else globalThis.HTMLElement = originalHTMLElement
   await server.close()
 })
-const node = (type, text = '') => ({
+const node = (type, text = '') => markRaw({
   type,
   text,
   props: {},
   children: [],
   parent: null,
   tagName: type.toUpperCase(),
+  open: false,
+  showModal() { this.open = true },
+  close() { this.open = false },
+  focus() { globalThis.document.activeElement = this },
+  querySelectorAll() { return all(this, e => e.type === 'button' && !e.props.disabled) },
   value: '',
   getRootNode: () => ({ activeElement: null }),
   get options() {
@@ -155,7 +172,7 @@ const mount = async (component, path = '/products/1', props = {}) => {
     routes: [
       { path: '/products/:id', component },
       { path: '/:pathMatch(.*)*', component },
-      ...['cart', 'products', 'home', 'member-order-detail', 'product-detail'].map((name) => ({
+      ...['cart', 'checkout', 'products', 'home', 'member-order-detail', 'product-detail'].map((name) => ({
         path:
           '/fixture/' +
           name +
@@ -183,7 +200,7 @@ const mount = async (component, path = '/products/1', props = {}) => {
   app.use(router)
   app.mount(root)
   await settle()
-  return { root, app, router }
+  return { root, app, router, pinia }
 }
 const button = (root, label) => all(root, (e) => e.type === 'button' && text(e).includes(label))[0]
 const page = (data = [], current = 1, last = 1) => ({
@@ -530,7 +547,7 @@ for (const action of ['設為預設', '刪除'])
   test(
     'Address ' + action + ' success plus refresh failure keeps success and only retries GET',
     async () => {
-      globalThis.window = { confirm: () => true }
+      globalThis.window = { confirm: () => { throw new Error('Native confirm forbidden') } }
       requests.length = 0
       handler = (c) => Promise.resolve(baseline(c))
       const v = await mount(components.addresses, '/member/addresses')
@@ -540,6 +557,8 @@ for (const action of ['設為預設', '刪除'])
           ? Promise.reject(new Error('503'))
           : Promise.resolve(reply(c, { message: '操作已成功' }))
       button(v.root, action).props.onClick()
+      await settle()
+      if (action === '刪除') { button(v.root, '刪除地址').props.onClick(); await settle() }
       await settle()
       await settle()
       assert.match(text(v.root), /操作已成功/)
@@ -746,4 +765,141 @@ test('Main product network failure retries just one main GET before starting ind
   assert.match(text(v.root), /Product-1/)
   assert.equal(requests.filter(c => c.url.endsWith('/related')).length, 1)
   v.app.unmount()
+})
+
+
+const openFeedbackCase = async (kind) => {
+  requests.length = 0
+  globalThis.window = { confirm: () => { throw new Error('Native confirm forbidden') } }
+  handler = c => Promise.resolve(baseline(c))
+  const isAddress = kind === 'address'
+  const v = await mount(isAddress ? components.addresses : components.cart, isAddress ? '/member/addresses' : '/cart?cart_sync=failed')
+  const carts = useCartStore(v.pinia)
+  const auth = useAuthStore(v.pinia)
+  if (!isAddress) {
+    carts.memberCart = { items: [{ ...guest, id: 1 }], item_count: 2, subtotal: '20.00', has_unavailable_items: false }
+    carts.guestItems = [{ ...guest }]
+    if (kind.startsWith('guest-')) auth.currentUser = null
+  }
+  await settle()
+  const label = isAddress ? '刪除' : kind === 'discard' ? '放棄訪客購物車' : kind.endsWith('clear') ? '清空購物車' : '移除商品'
+  const trigger = new FixtureElement(); globalThis.document.activeElement = trigger
+  assert.ok(button(v.root, label), 'fixture missing button: '+text(v.root)); button(v.root, label).props.onClick(); await settle()
+  return { ...v, carts, auth, label, trigger, dialog: all(v.root, e => e.type === 'dialog')[0] }
+}
+const dialogButton = (v, label) => button(v.dialog, label)
+for (const kind of ['remove', 'clear', 'discard', 'address', 'guest-remove', 'guest-clear']) {
+  for (const cancelVia of ['button', 'escape']) test('Feedback ' + kind + ' ' + cancelVia + ' has zero mutation and keeps data', async () => {
+    const v = await openFeedbackCase(kind)
+    const before = JSON.stringify({ member: v.carts.memberCart, guest: v.carts.guestItems, user: v.auth.currentUser })
+    const mutations = requests.filter(c => c.method !== 'get').length
+    assert.equal(v.dialog.open, true)
+    assert.equal(text(globalThis.document.activeElement), '取消')
+    if (cancelVia === 'button') dialogButton(v, '取消').props.onClick()
+    else v.dialog.props.onCancel({ preventDefault() {} })
+    await settle()
+    assert.equal(v.dialog.open, false)
+    assert.equal(globalThis.document.activeElement, v.trigger)
+    assert.equal(requests.filter(c => c.method !== 'get').length, mutations)
+    assert.equal(JSON.stringify({ member: v.carts.memberCart, guest: v.carts.guestItems, user: v.auth.currentUser }), before)
+    v.app.unmount()
+  })
+  test('Feedback ' + kind + ' confirms once and locks until original async work finishes', async () => {
+    const v = await openFeedbackCase(kind)
+    const d = deferred(); const beforeUser = JSON.stringify(v.auth.currentUser)
+    handler = c => c.method !== 'get' ? d.promise.then(() => reply(c, kind === 'address' ? { message: '操作已成功' } : { data: { items: [], item_count: 0, subtotal: '0', has_unavailable_items: false } })) : Promise.resolve(baseline(c))
+    const confirm = all(v.dialog, e => e.type === 'button')[1]
+    confirm.props.onClick(); confirm.props.onClick(); await settle()
+    if (['remove','clear','address'].includes(kind)) {
+      assert.equal(requests.filter(c => c.method !== 'get').length, 1)
+      assert.equal(confirm.props.disabled, true)
+      assert.equal(dialogButton(v, '取消').props.disabled, true)
+      v.dialog.props.onCancel({ preventDefault() {} }); await settle()
+      assert.equal(v.dialog.open, true)
+      assert.match(text(v.dialog), /送出後無法取消/)
+      d.resolve(); await settle(); await settle()
+    }
+    assert.equal(v.dialog.open, false)
+    assert.equal(JSON.stringify(v.auth.currentUser), beforeUser)
+    if (kind.startsWith('guest-') || kind === 'discard') {
+      assert.equal(v.carts.guestItems.length, 0)
+      assert.equal(requests.filter(c => c.method !== 'get').length, 0)
+    }
+    if (kind === 'discard') assert.equal(v.router.currentRoute.value.query.cart_sync, undefined)
+    v.app.unmount()
+  })
+}
+for (const kind of ['remove','address']) for (const status of [403,419,422,429,500,'network']) test('Feedback ' + kind + ' failure ' + status + ' retains data and persistent error without retry', async () => {
+  const v = await openFeedbackCase(kind)
+  const before = JSON.stringify(v.carts.memberCart)
+  handler = () => Promise.reject({ isAxiosError: true, response: status === 'network' ? undefined : { status, data: { message: 'Fixture failure' } } })
+  all(v.dialog, e => e.type === 'button')[1].props.onClick(); await settle(); await settle()
+  assert.equal(v.dialog.open, false)
+  assert.equal(requests.filter(c => c.method !== 'get').length, 1)
+  assert.equal(JSON.stringify(v.carts.memberCart), before)
+  assert.ok(all(v.root, e => e.props.role === 'alert').length > 0)
+  assert.match(text(v.root), kind === 'address' ? /地址刪除失敗/ : /Fixture failure|購物車操作失敗/)
+  await settle(); assert.ok(all(v.root, e => e.props.role === 'alert').length > 0)
+  v.app.unmount()
+})
+test('Dialog traps both Tab boundaries and rejects background clicks', async () => {
+  const v = await openFeedbackCase('remove')
+  const cancel = dialogButton(v, '取消'), confirm = all(v.dialog, e => e.type === 'button')[1]
+  let prevented = 0
+  globalThis.document.activeElement = cancel
+  v.dialog.props.onKeydown({ key:'Tab',shiftKey:true,preventDefault(){prevented++} })
+  assert.equal(text(globalThis.document.activeElement), text(confirm))
+  v.dialog.props.onKeydown({ key:'Tab',shiftKey:false,preventDefault(){prevented++} })
+  assert.equal(text(globalThis.document.activeElement), '取消')
+  assert.equal(prevented, 2)
+  assert.equal(v.dialog.props.onClick, undefined) // No backdrop dismissal or accidental confirmation.
+  cancel.props.onClick(); await settle()
+  v.app.unmount()
+})
+test('Notice roles preserve success status and persistent warning/error alert semantics', () => {
+  for (const tone of ['success','warning','error']) {
+    const root=node('root'); const app=renderer.createApp({render:()=>h(components.notice,{tone},{default:()=> 'Fixture notice'})});app.mount(root)
+    assert.equal(all(root,e=>e.props.role)[0].props.role,tone==='success'?'status':'alert')
+    assert.equal(all(root,e=>e.props.role)[0].props['aria-live'],undefined) // role supplies live semantics once.
+    assert.match(text(root),/Fixture notice/); app.unmount()
+  }
+})
+test('Both views contain no native confirm and retain original mutation handlers', async()=>{
+  for(const path of ['views/CartView.vue','views/MemberAddressView.vue']) assert.doesNotMatch(await source(path),/window\.confirm/)
+})
+
+
+test('Dialog restores safe fallback when original trigger was removed', async () => {
+  const v = await openFeedbackCase('remove')
+  const fallback = new FixtureElement()
+  v.trigger.isConnected = false
+  const previous = globalThis.document.querySelector
+  globalThis.document.querySelector = selector => { assert.equal(selector, '#cart-heading'); return fallback }
+  dialogButton(v, '取消').props.onClick(); await settle()
+  assert.equal(globalThis.document.activeElement, fallback)
+  globalThis.document.querySelector = previous
+  v.app.unmount()
+})
+
+
+test('Dialog unexpected action failure is visible and cannot resubmit an unknown result', async () => {
+  const root = node('root'); const app = renderer.createApp(components.confirm, { fallbackFocus:'#cart-heading' }); const vm = app.mount(root)
+  let calls = 0
+  await vm.ask({ title:'Fixture',description:'Fixture',confirmLabel:'確認' }, async () => { calls++; throw new Error('Fixture') })
+  const dialog = all(root,e=>e.type==='dialog')[0]
+  const confirm = button(dialog,'確認')
+  confirm.props.onClick(); await settle()
+  assert.equal(calls,1); assert.equal(dialog.open,true)
+  assert.match(text(dialog),/確認目前資料/)
+  assert.equal(confirm.props.disabled,true)
+  confirm.props.onClick(); await settle(); assert.equal(calls,1)
+  app.unmount()
+})
+test('Dialog unmount during a pending operation closes without refocusing or repeating work', async () => {
+  const root = node('root'); const app = renderer.createApp(components.confirm, { fallbackFocus:'#cart-heading' }); const vm = app.mount(root)
+  const d = deferred(); let calls=0
+  await vm.ask({title:'Fixture',description:'Fixture',confirmLabel:'確認'},async()=>{calls++;await d.promise})
+  const dialog=all(root,e=>e.type==='dialog')[0]
+  button(dialog,'確認').props.onClick();await settle();app.unmount()
+  assert.equal(dialog.open,false);d.resolve();await settle();assert.equal(calls,1)
 })
