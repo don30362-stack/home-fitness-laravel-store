@@ -12,6 +12,8 @@ import axios from 'axios'
 // 既有 Vue compiler + Vite 載入真實 SFC 的 client render；不新增測試框架。
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
 const views = {
+  'virtual:confirm-dialog': '/src/components/common/AppConfirmDialog.vue',
+  'virtual:notice': '/src/components/common/AppNotice.vue',
   'virtual:order-list': '/src/views/MemberOrderListView.vue',
   'virtual:order-pagination': '/src/components/common/AppPagination.vue',
   'virtual:order-detail': '/src/views/MemberOrderDetailView.vue',
@@ -27,6 +29,8 @@ const server = await createServer({ server: { middlewareMode: true }, appType: '
   name: 'order-list-test-sfc', enforce: 'pre',
   resolveId(id) {
     if (id in views) return '\0' + id + '.ts'
+    if (id.endsWith('/AppConfirmDialog.vue')) return '\0virtual:confirm-dialog.ts'
+    if (id.endsWith('/AppNotice.vue')) return '\0virtual:notice.ts'
     if (id.endsWith('/ProductCategoryNav.vue')) return '\0virtual:product-category-nav.ts'
     if (id.endsWith('/ProductCard.vue')) return '\0virtual:product-card.ts'
     if (id.endsWith('/ProductGallery.vue')) return '\0virtual:product-gallery.ts'
@@ -63,6 +67,8 @@ after(async () => { console.error = originalError; await server.close() })
 const node = (type, text = '') => ({
   type, tagName: type.toUpperCase(), text, props: {}, children: [], parent: null,
   value: '', listeners: {},
+  showModal() { this.open = true },
+  close() { this.open = false },
   addEventListener(event, handler) { this.listeners[event] = handler },
   removeEventListener(event) { delete this.listeners[event] },
   get options() { return this.children.filter((child) => child.type === 'option') },
