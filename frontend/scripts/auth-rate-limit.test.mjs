@@ -93,6 +93,96 @@ const settle = async () => {
   await nextTick()
 }
 
+const mountPhoneForm = async (phone, rejectPhone = false) => {
+  storage.clear()
+  const pinia = createPinia(); setActivePinia(pinia)
+  const requests = []
+  const adapter = async config => {
+    requests.push(config)
+    if (config.method !== 'post') return { data: {}, status: 204, headers: {}, config }
+    if (rejectPhone) throw new axios.AxiosError('fixture', 'ERR_BAD_RESPONSE', config, undefined, {
+      config, status: 422, headers: {}, data: { message: 'Server validation', errors: { phone: ['Server phone validation remains authoritative'] } },
+    })
+    return { data: { message: 'Registered', data: { id: 99, name: 'Fixture', email: 'fixture@example.test' } }, status: 201, headers: {}, config }
+  }
+  axios.defaults.adapter = adapter; api.defaults.adapter = adapter
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/register', name: 'register', component: { render: () => null } },
+    { path: '/login', name: 'login', component: { render: () => null } },
+  ] })
+  await router.push('/register'); await router.isReady()
+  const root = node('root'); const app = renderer.createApp({ render: () => h(components.register) }); app.use(pinia); app.use(router); app.mount(root)
+  for (const input of all(root, e => e.type === 'input')) {
+    const id = input.props.id
+    input.props['onUpdate:modelValue'](id === 'phone' ? phone : id.toLowerCase().includes('password') ? 'dummy-fixture-password' : id === 'email' ? 'fixture@example.test' : 'Fixture')
+  }
+  await settle()
+  return { root, app, router, requests, submit: () => all(root, e => e.type === 'form')[0].props.onSubmit({ preventDefault() {} }) }
+}
+
+for (const phone of ['', 'abc', '0812345678', '091234567', '09123456789', '09１２３４５６７８', '0912-345-678']) {
+  test(`Register rejects invalid phone ${JSON.stringify(phone)} before any request and connects its error`, async () => {
+    const v = await mountPhoneForm(phone)
+    const input = all(v.root, e => e.props.id === 'phone')[0]
+    assert.equal(input.props.inputmode, 'numeric'); assert.equal(input.props.pattern, undefined)
+    input.props.onBlur(); await settle()
+    assert.equal(input.props['aria-invalid'], true)
+    assert.match(input.props['aria-describedby'], /register-phone-hint register-error-phone/)
+    v.submit(); await settle()
+    assert.equal(v.requests.length, 0)
+    assert.match(text(v.root), /09 開頭的 10 位數字/)
+    assert.equal(v.router.currentRoute.value.path, '/register')
+    const submit = all(v.root, e => e.type === 'button' && e.props.type === 'submit')[0]
+    assert.equal(submit.props.disabled, false)
+    input.props['onUpdate:modelValue']('0912345678'); input.props.onBlur(); await settle()
+    assert.equal(input.props['aria-invalid'], false)
+    assert.equal(input.props['aria-describedby'], 'register-phone-hint')
+    v.app.unmount()
+  })
+}
+
+for (const phone of ['0912345678', ' 0912345678 ']) {
+  test(`Register valid phone ${JSON.stringify(phone)} keeps CSRF, single submit and login redirect`, async () => {
+    const v = await mountPhoneForm(phone)
+    v.submit(); v.submit(); await settle(); await settle()
+    assert.equal(v.requests.filter(r => r.method === 'get').length, 1)
+    const posts = v.requests.filter(r => r.method === 'post')
+    assert.equal(posts.length, 1); assert.equal(JSON.parse(posts[0].data).phone, '0912345678')
+    assert.equal(v.router.currentRoute.value.path, '/login'); assert.equal(v.router.currentRoute.value.query.registered, '1')
+    v.app.unmount()
+  })
+}
+
+test('Register native required phone invalid event shows its field error without disabling other native constraints', async () => {
+  const v = await mountPhoneForm('')
+  const input = all(v.root, e => e.props.id === 'phone')[0]
+  assert.notEqual(input.props.required, undefined)
+  input.props.onInvalid(); await settle()
+  assert.equal(input.props['aria-invalid'], true)
+  assert.match(text(v.root), /09 開頭的 10 位數字/)
+  assert.equal(v.requests.length, 0)
+  assert.equal(all(v.root, e => e.type === 'form')[0].props.novalidate, undefined)
+  for (const id of ['name', 'email', 'password', 'passwordConfirmation']) {
+    const field = all(v.root, e => e.props.id === id)[0]
+    assert.notEqual(field.props.required, undefined)
+    if (id === 'email') assert.equal(field.props.type, 'email')
+    if (id.toLowerCase().includes('password')) assert.equal(field.props.minlength, '8')
+  }
+  input.props['onUpdate:modelValue'](' 0912345678 '); input.props.onBlur(); await settle()
+  assert.equal(input.props['aria-invalid'], false)
+  v.app.unmount()
+})
+
+test('Register valid client format still displays authoritative server phone validation', async () => {
+  const v = await mountPhoneForm('0912345678', true)
+  v.submit(); await settle(); await settle()
+  assert.equal(v.requests.filter(r => r.method === 'post').length, 1)
+  assert.match(text(v.root), /Server phone validation remains authoritative/)
+  assert.equal(all(v.root, e => e.props.id === 'phone')[0].props['aria-invalid'], true)
+  assert.equal(v.router.currentRoute.value.path, '/register')
+  v.app.unmount()
+})
+
 for (const kind of Object.keys(files)) {
   for (const status of [429, 419, 422, 500, 'network']) test(`${kind} HTTP ${status}: single mutation, visible error, identity/cart isolation`, async () => {
     storage.clear(); storage.set('home-fitness-store-guest-cart', 'preserved-marker')

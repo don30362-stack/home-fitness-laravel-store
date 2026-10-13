@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test, after } from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'vite'
-import { parse, compileScript } from '@vue/compiler-sfc'
+import { parse, compileScript, compileStyle } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createRenderer, nextTick, h } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -16,6 +16,7 @@ const files = {
   'virtual:member': '/src/views/MemberView.vue',
   'virtual:list': '/src/views/ProductListView.vue',
   'virtual:pagination': '/src/components/common/AppPagination.vue',
+  'virtual:card': '/src/components/product/ProductCard.vue',
 }
 const server = await createServer({ server: { middlewareMode: true }, appType: 'custom', plugins: [{
   name: 'storefront-ui-test', enforce: 'pre',
@@ -34,6 +35,7 @@ const { default: Member } = await server.ssrLoadModule('virtual:member')
 const { useAuthStore } = await server.ssrLoadModule('/src/stores/auth.ts')
 const { default: ProductList } = await server.ssrLoadModule('virtual:list')
 const { default: Pagination } = await server.ssrLoadModule('virtual:pagination')
+const { default: ProductCard } = await server.ssrLoadModule('virtual:card')
 const { default: api } = await server.ssrLoadModule('/src/services/api.ts')
 const requests = []
 api.defaults.adapter = async config => {
@@ -62,6 +64,41 @@ const mountList = async path => {
   await settle(); await settle()
   return { root, app, router }
 }
+
+test('Product image, name and existing CTA are separate accessible detail links', async () => {
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/products', component: { render: () => null } },
+    { path: '/products/:id', name: 'product-detail', component: { render: () => null } },
+  ] })
+  await router.push('/products'); await router.isReady()
+  const product = { id: 25, name: '長商品名稱 Fixture', price: '8980', images: [{ is_primary: true, image_url: '/fixture.webp' }] }
+  const root = node('root'); const app = renderer.createApp({ render: () => h(ProductCard, { product }) }); app.use(router); app.mount(root)
+  const links = all(root, e => e.type === 'a')
+  assert.equal(links.length, 3)
+  for (const link of links) {
+    assert.equal(link.props.href, '/products/25')
+    assert.equal(link.children.flatMap(child => all(child, e => e.type === 'a')).length, 0)
+  }
+  assert.match(links[0].props['aria-label'], /長商品名稱 Fixture/)
+  assert.equal(all(root, e => e.type === 'img')[0].props.alt, product.name)
+  assert.equal(text(links[1]), product.name)
+  assert.match(text(links[2]), /查看商品/)
+  assert.equal(all(root, e => e.type === 'article')[0].props.onClick, undefined)
+  links[0].props.onClick({ button: 0, preventDefault() {} }); await settle(); await settle()
+  assert.equal(router.currentRoute.value.fullPath, '/products/25')
+  all(root, e => e.type === 'img')[0].props.onError(); await settle()
+  assert.match(text(links[0]), /商品圖片準備中/)
+  assert.equal(links[0].props.href, '/products/25')
+  app.unmount()
+})
+
+test('Compiled pagination brand selector targets the component, not just its ancestor', async () => {
+  const descriptor = parse(await source('components/common/AppPagination.vue')).descriptor
+  const css = compileStyle({ source: descriptor.styles[0].content, filename: 'AppPagination.vue', id: 'data-v-test', scoped: true })
+  assert.deepEqual(css.errors, [])
+  assert.match(css.code, /\.storefront-shell \.pagination\s*\{/)
+  assert.match(css.code, /--bs-pagination-active-bg:\s*var\(--hf-charcoal\)/)
+})
 
 test('Mobile category disclosure changes local state without fetching or losing URL filters', async () => {
   const v = await mountList('/products?search=啞鈴&category_id=11&sort=price_asc&min_price=100&page=2')

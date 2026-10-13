@@ -278,7 +278,12 @@ test('all nine recommendations including stock zero use ProductCard details in A
   api.defaults.adapter = async (config) => reply(config, config.url === '/recommended-products' ? products : dataFor(config.url))
   const view = await mount(); await settle()
   const section = find(view.root, (el) => el.props['aria-labelledby'] === 'recommended-title')
-  assert.deepEqual(all(section, (el) => el.type === 'a').map((el) => el.props.href), products.map((p) => '/products/' + p.id))
+  const cards = all(section, (el) => el.type === 'article' && el.props.class === 'product-card')
+  assert.equal(cards.length, products.length)
+  assert.deepEqual(cards.map(card => find(card, el => el.type === 'a').props.href), products.map(p => '/products/' + p.id))
+  for (const [index, card] of cards.entries()) {
+    assert.deepEqual(all(card, el => el.type === 'a').map(el => el.props.href), Array(3).fill('/products/' + products[index].id))
+  }
   assert.equal(all(section, (el) => el.type === 'h2' && el.props.class === 'product-name').length, 9)
   assert.ok(!text(section).includes('缺貨'))
   view.app.unmount()

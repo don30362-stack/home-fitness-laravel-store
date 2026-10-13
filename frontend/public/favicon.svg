@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Small-size rendering of the existing Home Fit house, barbell and gold bench mark. -->
+  <rect width="64" height="64" rx="6" fill="#F5F2EC"/>
+  <g fill="none" stroke="#2E2E2D" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 21v-6L32 3l20 12v6M8 31h48M5 26v10m7-14v18m40-18v18m7-14v10"/>
+  </g>
+  <path fill="#2E2E2D" d="M28 15h3v3h-3zm5 0h3v3h-3zm-5 5h3v3h-3zm5 0h3v3h-3z"/>
+  <g fill="none" stroke="#BD935A" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m23 47 18-23M20 40h22m-18 0-5 10m20-10 8 10M12 47v11h40V47"/>
+  </g>
+</svg>

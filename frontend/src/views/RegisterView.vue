@@ -19,6 +19,16 @@ const isSubmitting = ref(false);
 const errorMessage = ref('');
 const fieldErrors = ref<Record<string, string[]>>({});
 
+const validatePhone = () => {
+    phone.value = phone.value.trim()
+    if (!/^09[0-9]{8}$/.test(phone.value)) {
+        fieldErrors.value.phone = ['電話號碼必須是 09 開頭的 10 位數字。']
+        return false
+    }
+    delete fieldErrors.value.phone
+    return true
+}
+
 const handleRegister = async () => {
     if (isSubmitting.value) {
         return
@@ -31,6 +41,8 @@ const handleRegister = async () => {
         fieldErrors.value.password = ['密碼與確認密碼不一致']
         return
     }
+
+    if (!validatePhone()) return
 
     isSubmitting.value = true
 
@@ -99,12 +111,14 @@ const handleRegister = async () => {
                     </div>
 
                     <div class="mb-3">
-                        <label for="phone" class="form-label">電話</label>
+                        <label for="phone" class="form-label">手機號碼</label>
 
-                        <input id="phone" v-model="phone" type="tel" class="form-control"
-                            :class="{ 'is-invalid': fieldErrors.phone }" :aria-invalid="!!fieldErrors.phone" :aria-describedby="fieldErrors.phone ? 'address-error-phone' : undefined" maxlength="20" autocomplete="tel" required>
+                        <input id="phone" v-model="phone" type="tel" inputmode="numeric" class="form-control" @blur="validatePhone" @invalid="validatePhone"
+                            :class="{ 'is-invalid': fieldErrors.phone }" :aria-invalid="!!fieldErrors.phone" :aria-describedby="fieldErrors.phone ? 'register-phone-hint register-error-phone' : 'register-phone-hint'" maxlength="20" autocomplete="tel" required>
 
-                        <div v-if="fieldErrors.phone" id="address-error-phone" class="invalid-feedback">
+                        <p id="register-phone-hint" class="form-text mb-0">請輸入 09 開頭的 10 位手機號碼，例如 0912345678。</p>
+
+                        <div v-if="fieldErrors.phone" id="register-error-phone" class="invalid-feedback">
                             {{ fieldErrors.phone[0] }}
                         </div>
                     </div>

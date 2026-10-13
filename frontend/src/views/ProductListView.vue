@@ -301,7 +301,7 @@ watch(
       </aside>
       <section class="col-12 col-md-8 col-lg-9" aria-label="商品搜尋結果">
         <form class="mb-4" @submit.prevent="handleSearch">
-          <div class="input-group"><input v-model="searchKeyword" type="search" class="form-control" placeholder="搜尋商品名稱" aria-label="搜尋商品名稱" /><button class="btn btn-dark" type="submit">搜尋</button></div>
+          <div class="input-group product-search-group"><input v-model="searchKeyword" type="search" class="form-control" placeholder="搜尋商品名稱" aria-label="搜尋商品名稱" /><button class="btn btn-dark" type="submit">搜尋</button></div>
         </form>
         <p v-if="isLoading">商品載入中...</p>
         <div v-else-if="errorMessage" role="alert" class="text-danger"><p>{{ errorMessage }}</p><button type="button" class="btn btn-outline-dark" :disabled="isLoading" @click="retryProducts">重新載入商品</button></div>
@@ -316,6 +316,10 @@ watch(
   </div>
 </template>
 <style scoped>
+/* Inset focus stays within each joined control instead of covering its neighbour. */
+.product-search-group .form-control:focus { box-shadow: none; }
+.product-search-group :is(.form-control, .btn):focus-visible { outline: 2px solid #8a6638; outline-offset: -4px; box-shadow: none; }
+.product-search-group .btn:focus-visible { outline-color: var(--hf-gold); }
 .product-filters-panel { padding: 1.25rem; background: var(--hf-ivory); border: 1px solid var(--hf-stone); }
 .product-filter-toggle { display: none; }
 @media (max-width: 767.98px) {
