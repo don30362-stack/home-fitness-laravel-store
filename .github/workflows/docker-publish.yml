@@ -3,10 +3,20 @@ name: Build and Publish Docker Images
 
 on:
   workflow_dispatch:
+    inputs:
+      php_security:
+        description: Build app only and reuse the verified production web image
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
   packages: write
+
+concurrency:
+  group: docker-publish-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   build-and-push:
@@ -38,10 +48,45 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Refuse to overwrite a security release tag
+        if: inputs.php_security
+        env:
+          SERVICE: ${{ matrix.service }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="ghcr.io/${OWNER_LC}/home-fitness-${SERVICE}:sha-${GITHUB_SHA}"
+          if docker buildx imagetools inspect "$target" > "$RUNNER_TEMP/tag-check.out" 2> "$RUNNER_TEMP/tag-check.err"; then
+            echo "Release tag already exists; refusing to overwrite."
+            exit 1
+          fi
+          if ! grep -Eqi 'manifest unknown|: not found$|404 Not Found' "$RUNNER_TEMP/tag-check.err"; then
+            echo "Cannot establish that the release tag is absent; stopping."
+            exit 1
+          fi
+
       - name: Build and push image
+        if: matrix.service == 'app' || !inputs.php_security
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
           platforms: linux/amd64
+          pull: true
           push: true
+          labels: org.opencontainers.image.revision=${{ github.sha }}
           tags: ghcr.io/${{ env.OWNER_LC }}/home-fitness-${{ matrix.service }}:sha-${{ github.sha }}
+
+      - name: Reuse verified web index without rebuilding
+        if: inputs.php_security && matrix.service == 'web'
+        env:
+          WEB_DIGEST: sha256:320ce1b84f1a8505d547131fa4da6d6083516b7c42fd09a4b1a6ca8fa06b46ed
+        shell: bash
+        run: |
+          set -euo pipefail
+          source="ghcr.io/${OWNER_LC}/home-fitness-web@${WEB_DIGEST}"
+          target="ghcr.io/${OWNER_LC}/home-fitness-web:sha-${GITHUB_SHA}"
+          docker buildx imagetools inspect "$source" --format '{{json .Manifest}}' > "$RUNNER_TEMP/web-source.json"
+          jq -e --arg digest "$WEB_DIGEST" '.mediaType == "application/vnd.oci.image.index.v1+json" and .digest == $digest' "$RUNNER_TEMP/web-source.json"
+          docker buildx imagetools create --tag "$target" "$source"
+          docker buildx imagetools inspect "$target" --format '{{json .Manifest}}' > "$RUNNER_TEMP/web-target.json"
+          jq -e --arg digest "$WEB_DIGEST" '.mediaType == "application/vnd.oci.image.index.v1+json" and .digest == $digest' "$RUNNER_TEMP/web-target.json"

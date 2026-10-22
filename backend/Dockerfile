@@ -1,4 +1,4 @@
-FROM php:8.4-fpm-bookworm AS vendor-build
+FROM php:8.4.27-fpm-bookworm@sha256:6d2c08c2ce0548e9bc55e21aab68f5a2613e635e4225fdea84290459728995e7 AS vendor-build
 
 RUN docker-php-ext-install pdo_mysql
 
@@ -35,7 +35,7 @@ RUN COMPOSER_ALLOW_SUPERUSER=1 composer dump-autoload \
 
 
 # Stage 2：正式執行環境
-FROM php:8.4-fpm-bookworm AS runtime
+FROM php:8.4.27-fpm-bookworm@sha256:6d2c08c2ce0548e9bc55e21aab68f5a2613e635e4225fdea84290459728995e7 AS runtime
 
 RUN docker-php-ext-install pdo_mysql
 
