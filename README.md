@@ -1,8 +1,8 @@
 # Home Fitness｜Laravel + Vue 電商作品集
 
-Home Fitness 是一個家用重訓器材電商作品，前端使用 **Vue 3 和 TypeScript**，後端使用 **Laravel**。從瀏覽商品、加入購物車到結帳與訂單管理，已完成前後台功能、正式部署及人工驗收。
+Home Fitness 是以 **Vue 3 + TypeScript** 與 **Laravel 13** 建置的前後端分離電商作品集，包含商品、購物車、會員、結帳、訂單與管理後台。專案已部署至 AWS，並透過自動化測試、隔離整合測試與人工驗收檢查功能及權限控管。
 
-開發時除了完成畫面，也處理了請求回應順序、登入狀態切換、庫存扣除與後台權限等問題。網站提供貨到付款與模擬信用卡流程，作為求職展示使用，沒有提供真實商業交易服務。
+## 線上展示
 
 | 體驗入口 | 連結與說明 |
 | --- | --- |
@@ -10,11 +10,34 @@ Home Fitness 是一個家用重訓器材電商作品，前端使用 **Vue 3 和 
 | 唯讀後台 | [管理員登入頁](https://homefit-store.ddnsfree.com/admin/login) →「進入唯讀 Demo」，不需公開管理員帳密 |
 | 原始碼 | [GitHub Repository](https://github.com/don30362-stack/home-fitness-laravel-store) |
 
-**正式部署版本（AWS `RELEASE_SHA`）：** [`86dfcde7f86e72ee98a2aa346300971932529815`](https://github.com/don30362-stack/home-fitness-laravel-store/commit/86dfcde7f86e72ee98a2aa346300971932529815)（2026-10-23，依賴與基底映像安全更新）。正式 app／web 均由此版本全新建置並發布，使用相同完整 SHA 標籤。
-
-安全修補已透過 [Merge Commit `6b53544`](https://github.com/don30362-stack/home-fitness-laravel-store/commit/6b53544b559341ea336f8faeb794c4c9edf13845) 納入 GitHub `main`。`main` 可包含後續 Merge／Docs Commit，不能當作 AWS 已部署版本；AWS `RELEASE_SHA` 指定部署來源，GHCR OCI Index Digest 則識別實際映像內容。
-
 Demo 可瀏覽 Dashboard、商品、分類、庫存及首頁內容，不能新增、修改或刪除，也不開放會員、訂單及管理員管理。體驗前台時，請使用測試資料，不要輸入真實個資或付款資訊。
+
+網站提供貨到付款與模擬信用卡流程，僅供作品展示，沒有提供真實商業交易服務。
+
+## 三大技術亮點
+
+### 訂單與庫存一致性
+
+Laravel Service 以資料庫交易、列鎖與訂單快照處理結帳，取消訂單時回補庫存。後端重新確認價格與數量，協調並行請求，避免部分寫入或重複取消造成資料不一致。[設計與程式碼](#1-訂單與庫存一致性)
+
+### 管理員權限與唯讀 Demo
+
+會員與管理員認證分離，後端檢查功能權限及資料所有權；公開 Demo 另以 API 白名單限制為唯讀。操作限制由後端執行，不只依賴前端隱藏按鈕。[設計與程式碼](#2-管理員授權與唯讀-demo)
+
+### 購物車整合與 Vue 非同步狀態
+
+以 Pinia 整合訪客與會員購物車，登入合併失敗時保留訪客資料及恢復入口。搭配登入版本與請求序號防護，避免舊回應覆蓋目前畫面。[購物車設計](#3-訪客與會員購物車整合) · [非同步狀態設計](#4-vue-非同步狀態與失敗恢復)
+
+## 技術組合
+
+| 層級 | 主要技術 |
+| --- | --- |
+| 前端 | Vue 3、TypeScript、Pinia、Vue Router、Axios、Bootstrap 5 |
+| 後端 | PHP 8.4、Laravel 13、Sanctum SPA、REST API |
+| 資料庫 | MariaDB 11.4 |
+| 部署 | Docker Compose、Nginx、GitHub Actions、GHCR、AWS Lightsail |
+
+詳細用途見[技術架構與責任分工](#技術架構與責任分工)，實際版本與發布紀錄見[正式部署與交付](#6-正式部署與交付)。
 
 ## 作品畫面
 
@@ -97,15 +120,29 @@ Demo 使用獨立身分，後端只允許八條指定的 GET API，拒絕其他�
 
 更新前核對完整 Git SHA、Image Digest 與執行平台，只套用已確認的版本。更新 app 後重新建立設定快取，並重啟 PHP-FPM，讓 OPcache 使用新版程式。敏感設定、圖片與資料庫資料分開保存，不隨 Image 更新而移除。
 
-前一次更新於 2026-10-22 完成 PHP-FPM 8.4.27 安全修補。以原正式版本 `3ff0e39` 為業務程式基準，更新 PHP base image，未重構 Laravel／Vue 或升級 Composer 套件。隔離環境以合成資料驗證 Nginx → PHP-FPM → MariaDB 的 27 項功能與交易失敗回滾；安全發布模式只重新建置 app，web 沿用原 OCI Index Digest 建立同 SHA 標籤。
+<details>
+<summary>2026-10-23 正式版本、安全更新與恢復驗證</summary>
 
-該次正式切換前，先於獨立維護窗口建立加密異地恢復組，並在隔離環境實際還原 SQL 與必要檔案；完成驗證後，再進行正式映像切換。AWS Lightsail 依既有 Runbook 只更新 app／web、建立設定快取並重啟同一 app，確認運行中 FPM 為 8.4.27，保留原 db 容器及全部 Volumes。正式 HTTP 38 項符合預期，公開頁面、訪客購物車及唯讀 Demo 通過瀏覽器驗證；會員與 Owner 的 7 項人工驗收由使用者確認通過，正式交易及庫存異動未重測。網站維持 HTTPS，三服務健康；AWS 更新採受控操作，不是由 GitHub Actions 自動部署。
+**正式部署版本（AWS `RELEASE_SHA`）：** [`86dfcde7f86e72ee98a2aa346300971932529815`](https://github.com/don30362-stack/home-fitness-laravel-store/commit/86dfcde7f86e72ee98a2aa346300971932529815)（2026-10-23，依賴與基底映像安全更新）。正式 app／web 均由此版本全新建置並發布，使用相同完整 SHA 標籤。
+
+安全修補已透過 [Merge Commit `6b53544`](https://github.com/don30362-stack/home-fitness-laravel-store/commit/6b53544b559341ea336f8faeb794c4c9edf13845) 納入 GitHub `main`。`main` 可包含後續 Merge／Docs Commit，不能當作 AWS 已部署版本；AWS `RELEASE_SHA` 指定部署來源，GHCR OCI Index Digest 則識別實際映像內容。
 
 2026-10-23 再完成依賴與基底映像安全更新，app／web 均重新建置並發布。PHP-FPM 維持 **8.4.27**；後端為 Laravel **13.30.0**、Symfony HTTP Foundation **8.1.9**、CommonMark **2.10.2**、Flysystem **3.35.3**；前端為 Vue **3.5.42**、Axios **1.20.0**、Vite **8.2.4**。Node **24.22.1** 僅用於建置，正式 Nginx 為 **1.30.6**；MariaDB **11.4.13** 未升級。Node／Nginx 基底固定版本與官方 Digest。
 
 本次受控維護約 **63.54 秒**，先停止業務寫入並等待交易排空，建立新的加密異地一致恢復組，在隔離環境實際還原 **27 表、19 個外鍵、115 個 Storage 檔案**通過後，才於同一窗口更新 app／web。保留原 MariaDB 與所有正式 Volumes；維護已解除、三服務正常，舊映像與回滾材料保留。正式 HTTP、靜態檔案及使用者人工驗收結果見下表；正式交易、付款、取消及庫存異動未在本輪正式站重測。
 
 本次正式 GHCR OCI Index Digest：app `sha256:41e8e8a196dcc7e0da5350dc0cb40c8a3f9bb41a27fd6accc96d4a06f0c78f4b`；web `sha256:7392c22b914d7d10ff5a122989e627a743cac99fa0ded6a38148687c3a2ea258`。
+
+</details>
+
+<details>
+<summary>2026-10-22 PHP 安全修補（前一次更新）</summary>
+
+前一次更新於 2026-10-22 完成 PHP-FPM 8.4.27 安全修補。以原正式版本 `3ff0e39` 為業務程式基準，更新 PHP base image，未重構 Laravel／Vue 或升級 Composer 套件。隔離環境以合成資料驗證 Nginx → PHP-FPM → MariaDB 的 27 項功能與交易失敗回滾；安全發布模式只重新建置 app，web 沿用原 OCI Index Digest 建立同 SHA 標籤。
+
+該次正式切換前，先於獨立維護窗口建立加密異地恢復組，並在隔離環境實際還原 SQL 與必要檔案；完成驗證後，再進行正式映像切換。AWS Lightsail 依既有 Runbook 只更新 app／web、建立設定快取並重啟同一 app，確認運行中 FPM 為 8.4.27，保留原 db 容器及全部 Volumes。正式 HTTP 38 項符合預期，公開頁面、訪客購物車及唯讀 Demo 通過瀏覽器驗證；會員與 Owner 的 7 項人工驗收由使用者確認通過，正式交易及庫存異動未重測。網站維持 HTTPS，三服務健康；AWS 更新採受控操作，不是由 GitHub Actions 自動部署。
+
+</details>
 
 [正式 Compose](compose.production.yaml) · [Build／Publish Workflow](.github/workflows/docker-publish.yml) · [HTTPS 設定](deploy/production/nginx/https.conf) · [部署／更新／回滾 Runbook](deploy/production/README.md) · [2026-10-13 CI（歷史）](https://github.com/don30362-stack/home-fitness-laravel-store/actions/runs/38362185865) · [2026-10-22 PHP 安全修補發布（歷史）](https://github.com/don30362-stack/home-fitness-laravel-store/actions/runs/39718470768) · [2026-10-23 雙映像安全更新發布](https://github.com/don30362-stack/home-fitness-laravel-store/actions/runs/39924460985)
 
@@ -153,9 +190,24 @@ Vue 使用 Router 管理頁面與查詢條件、Pinia 保存身分及購物車�
 
 以下整理各次驗收結果。測試時間與範圍不同，數字不能直接相加；CI 也不會每次自動執行所有測試。
 
+### 2026-10-23 安全更新驗證
+
+對應已部署版本 `86dfcde7`。以下為該次已驗收結果，不代表每次文件更新都重新執行測試。
+
+| 環境／類型 | 結果 | 範圍與限制 |
+| --- | --- | --- |
+| 本機前端回歸 | **909 PASS** | Node.js 狀態管理、請求及元件測試，不是 Browser E2E |
+| 本機 Laravel | **1,063 PASS／2 SKIPPED** | 兩項測試因本機 symlink 限制跳過 |
+| 隔離 MariaDB 整合 | **32 組、116 筆 HTTP 通過** | 合成資料的功能、結帳、訂單、庫存及回滾驗證，不代表正式交易驗收 |
+| 隔離真實 Browser | **9 項通過** | 與 HTTP 請求及本機回歸分開計算 |
+| 正式 AWS 唯讀驗證 | **38 項 HTTP 符合預期**、**73 個靜態檔雜湊一致**、**3 張商品圖片正常** | 本輪正式交易、付款、取消及庫存異動未重測 |
+| Member／Owner 人工驗收 | **三類通過**，由使用者確認 | Member 登入／登出；地址簿、購物車及既有訂單唯讀；Owner 登入、權限及唯讀功能 |
+
+<details>
+<summary>歷史驗證紀錄（2026-10-11～2026-10-22）</summary>
+
 | 日期／對應版本 | 類型與結果 | 範圍與限制 |
 | --- | --- | --- |
-| 2026-10-23／`86dfcde7` 安全更新版本 | 本機前端 **909 PASS**；Laravel **1,063 PASS／2 SKIPPED**；隔離 MariaDB **32 組、116 筆 HTTP 通過**；隔離真實 Browser **9 項通過**；正式 AWS **38 項 HTTP 符合預期**、**73 個靜態檔雜湊一致**、**3 張商品圖片正常**；Member／Owner **三類人工驗收通過**（使用者確認） | 各階段數字不可相加，HTTP 不是 Browser E2E。人工確認涵蓋 Member 登入／登出、地址簿／購物車／既有訂單唯讀、Owner 登入／權限／唯讀功能；兩項 Laravel 測試因本機 symlink 限制跳過。隔離合成交易不代表正式交易驗收；本輪正式交易、付款、取消及庫存異動未重測 |
 | 2026-10-22／`88c5951` 安全修補版本 | 隔離測試 **27 項通過**、正式 HTTP **38 筆請求全部符合預期**；會員與 Owner 人工驗收 **7 項通過**（使用者確認） | 隔離測試含合成資料的結帳／訂單／庫存及失敗回滾；不代表正式交易驗收。本輪正式交易及庫存異動未重測；缺貨提示因無現存案例而跳過 |
 | 2026-10-13／`3ff0e39` 對應工作樹 | 八組前端回歸 **909 PASS**，Build／type-check 通過 | 以 Node.js 測試狀態管理、請求處理與 Vue 元件，含參數化及假 DOM；不是 909 項 Browser E2E |
 | 2026-10-13／`b882b81`，已納入目前版本 | 四檔 Admin／Demo 認證授權測試 **128 PASS／1,514 assertions** | 含 Demo 登出後管理讀取 401、會員 Session 保留；是專項子集 |
@@ -163,6 +215,8 @@ Vue 使用 Router 管理頁面與查詢條件、Pinia 保存身分及購物車�
 | 2026-10-11／當時 Stage30 隔離驗收版本，精確執行 SHA 待補 | MariaDB 11.4.13 **12 個競爭場景通過** | Checkout／庫存調整／取消，雙程序、獨立連線、實際鎖等待；不是全面壓測或目前版本重新執行 |
 | 2026-10-13／三批 UI 提交與 `3ff0e39` | 代表頁面的瀏覽器、RWD、正式 HTTP 與人工驗收 | 各批含 320／390／768／1280 寬度，整合只重驗部分情境；不是全站四尺寸 E2E |
 | 2026-10-13／`3ff0e39` | [app／web CI 建置發佈成功](https://github.com/don30362-stack/home-fitness-laravel-store/actions/runs/38362185865) | 同 SHA、linux/amd64、Digest 核對；AWS 更新另受控執行 |
+
+</details>
 
 原始驗收紀錄與截圖保存在本機，未放入公開 Repository。以下測試檔可查看具體案例：
 
