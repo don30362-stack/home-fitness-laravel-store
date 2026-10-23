@@ -1,5 +1,5 @@
 # Stage 1：Vue 前端建置
-FROM node:24-bookworm-slim AS frontend-build
+FROM docker.io/library/node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS frontend-build
 
 WORKDIR /app
 
@@ -17,7 +17,7 @@ RUN npm run build
 
 
 # Stage 2：正式 Nginx 執行環境
-FROM nginx:stable-alpine AS runtime
+FROM docker.io/library/nginx:1.30.6-alpine@sha256:47928bf67eb62a1863cb08d9ecb52d3e704304ba614eaee17884204677702951 AS runtime
 
 COPY --from=frontend-build /app/dist/ /usr/share/nginx/html/
 
