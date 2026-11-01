@@ -20,8 +20,8 @@ services:
       APP_ENV: production
       APP_DEBUG: "false"
       APP_KEY: ${APP_KEY:?APP_KEY is required}
-      APP_URL: "http://127.0.0.1:8081"
-      SANCTUM_STATEFUL_DOMAINS: "127.0.0.1:8081,localhost:8081"
+      APP_URL: "http://127.0.0.1:18081"
+      SANCTUM_STATEFUL_DOMAINS: "127.0.0.1:18081,localhost:18081"
       LOG_CHANNEL: stderr
       LOG_LEVEL: warning
       SESSION_DRIVER: file
@@ -59,7 +59,7 @@ services:
       start_period: 30s
 
     ports:
-      - "127.0.0.1:8081:80"
+      - "127.0.0.1:18081:80"
 
     volumes:
       - public_storage:/usr/share/nginx/html/storage:ro
